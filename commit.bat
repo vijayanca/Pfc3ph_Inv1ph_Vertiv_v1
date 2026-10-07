@@ -2,7 +2,7 @@
 setlocal
 REM ============================================================
 REM  commit.bat - save today's work to GitHub
-REM  Repo: https://github.com/vijayanca/Rect12P_GETEK_v4
+REM  Repo: https://github.com/vijayanca/RECT12P_GETEK_v4
 REM  Double-click this file, type a short note, press Enter.
 REM ============================================================
 
@@ -26,7 +26,7 @@ if not exist ".git" (
     git init -q -b main
     git config user.name "Vijayan"
     git config user.email "vijayanca@gmail.com"
-    git remote add origin https://github.com/vijayanca/Rect12P_GETEK_v4.git
+    git remote add origin https://github.com/vijayanca/RECT12P_GETEK_v4.git
     git fetch -q origin
     if errorlevel 1 (
         echo  Could not reach GitHub. Check the internet connection.
