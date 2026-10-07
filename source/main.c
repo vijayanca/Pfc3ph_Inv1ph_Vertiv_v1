@@ -200,11 +200,15 @@ float ibatref_old = 0;
     Batt_TestMode = FALSE;
     DO_TestFlag = FALSE;
 
+#if RTC_PRESENT
     ReadTime();
     secNow = RTCSecond;
     delay_ms(1050);
     ReadTime();
     if(secNow == RTCSecond) EnableRTCClock();
+#else
+    delay_ms(1050);     // no RTC (mcp79522.c excluded): keep the start-up timing
+#endif
 
     InitMCAN();
     MCAN_enableIntr(MCANA_DRIVER_BASE, MCAN_INTR_MASK_ALL, 1U);
@@ -255,7 +259,9 @@ float ibatref_old = 0;
         if (seconds!= seconds_old)
         {
             seconds_old = seconds;
+#if RTC_PRESENT
             ReadTime();
+#endif
           //  updateRelays();
 
             if(Vdc_Ref> 0.05) vdc_inc = Vdc_Ref * 0.01;
@@ -876,6 +882,7 @@ void update_rmsmeters(void)
 
         SCALEF(lpf_temp1.y,Temp1SF, BattTemp);
         SCALEF(lpf_temp2.y,Temp2SF, Temp2);
+        SCALEF(lpf_temp3.y,Temp3SF, Temp3);     // ambient, display only
 
 //        MainsFrequency =  OMEGAFACTOR * pllGrid.omega;
 //        if((MainsFrequency >= 47) && (MainsFrequency <= 62)) SysOkFlag.bit.SYNCOK = TRUE;
@@ -1036,7 +1043,9 @@ void storeEvents(void) {
     {
         RecordNumber++;
         if(RecordNumber > MAXPACKETS) RecordNumber = 0;
-        WriteRecordPointer(RecordNumber);
+#if RTC_PRESENT
+        WriteRecordPointer(RecordNumber);   // record pointer was kept in the RTC SRAM
+#endif
         //store
 
         eventAddr = (RecordNumber << 6) + LOGSTART;

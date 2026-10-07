@@ -85,6 +85,8 @@ typedef signed char S8;
 
 #define EnableTX()  GpioDataRegs.GPBSET.bit.GPIO34  = 1     // RS485 #2 (SCIA) TXEN = transmit
 #define DisableTX() GpioDataRegs.GPBCLEAR.bit.GPIO34    = 1 // RS485 #2 (SCIA) TXEN = receive
+#define EnableTX1()  GpioDataRegs.GPBSET.bit.GPIO40  = 1    // RS485 #1 (SCIB) TXEN = transmit
+#define DisableTX1() GpioDataRegs.GPBCLEAR.bit.GPIO40   = 1 // RS485 #1 (SCIB) TXEN = receive
 
 #define EnableRLY1()   GpioDataRegs.GPBSET.bit.GPIO60  = 1  // RLY1 = GPIO60 (board_pin_map.h)
 #define DisableRLY1()  GpioDataRegs.GPBCLEAR.bit.GPIO60    = 1

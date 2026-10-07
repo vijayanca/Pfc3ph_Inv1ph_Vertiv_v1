@@ -29,6 +29,7 @@
 #define    IdcTotal         ArrayParamsF[14] //,A,1
 #define    LoadCurrent      ArrayParamsF[15] //,A,1
 #define    VdcRipple        ArrayParamsF[16] //,V,1
+#define    Temp3            ArrayParamsF[17]  //,degC,1
 
 #define    kVA_Rph          ArrayParamsF[20] //,kVA,1
 #define    kVA_Yph          ArrayParamsF[21] //,kVA,1
@@ -173,6 +174,7 @@
 #define    VloadSF                 ArrayParamsF[174]  //,,1
 #define    Temp1SF                 ArrayParamsF[175]  //,,1
 #define    Temp2SF                 ArrayParamsF[176]  //,,1
+#define    Temp3SF                 ArrayParamsF[177]  //,,1
 
 #define    SyncAdjustAngle         ArrayParamsF[179]  //,Deg,1
 #define    Bridge2AngleAdjust      ArrayParamsF[180]  //,,1
@@ -290,7 +292,7 @@
 #define     AnalogInput15           ArrayParamsI[30] //,Vref,1
 #define     AnalogInput16           ArrayParamsI[31] //,Temp1,1
 #define     AnalogInput17           ArrayParamsI[32] //,TEMP2,1
-#define     AnalogInput18           ArrayParamsI[33] //,DI_1,1
+#define     AnalogInput18           ArrayParamsI[33] //,Temp3,1
 #define     AnalogInput19           ArrayParamsI[34] //,DI2,1
 #define     AnalogInput20           ArrayParamsI[35] //,DI_3,1
 #define     AnalogInput21           ArrayParamsI[36] //,DI4,1

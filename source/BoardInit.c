@@ -388,118 +388,58 @@ void ConfigureADC(void)
  *  D   Vr_inv D14  Vb_out D15  Vy_out D12  Ibat D11        -
  *  E   Ib_ind E11  Vy_inv E12  Vr_out E16  -               -
  *
- * TODO (new board): map the rectifier signals (Vr/Vy/Vb, Ir/Iy/Ib, Vdc, Idc,
- * Idc2, Vbat, Ibat, Iref, Temp) onto these inputs, then update the SOCs below
- * and the AnalogInputN assignments in AdcISR (interrupt.c) together.
- * Until then the SOC set-up of the previous board is kept unchanged.
+ * 12-pulse rectifier assignment (NU = not used, SOC not configured):
+ *
+ *        SOC0          SOC1          SOC2          SOC3          SOC4
+ *  A   Idc1   A0     Iinp_R A5     Iinp_B A8     Vload  A14    Temp1 A9
+ *  B   Vinp_B B3     Iinp_Y B8     NU     B9     Vref1.5 B0    Temp3 B1
+ *  C   Idc2   C5     Vdc    C0     NU     C9     Vbat   C2     Temp2 C8
+ *  D   Vinp_R D14    NU     D15    NU     D12    Ibat   D11    -
+ *  E   NU     E11    Vinp_Y E12    NU     E16    -             -
+ *
+ * Results are read in AdcISR (interrupt.c) into AnalogInput1..18 (labels in
+ * RectParams.h). EOC: ADCA INT1 on EOC4 (ADC-A has the most conversions).
  */
+#define SET_SOC(REGS, N, CH)                        \
+    REGS.ADCSOC##N##CTL.bit.CHSEL   = (CH);         \
+    REGS.ADCSOC##N##CTL.bit.ACQPS   = acqps;        \
+    REGS.ADCSOC##N##CTL.bit.TRIGSEL = trig_sel
+
 void setupADC(uint16_t trig_sel, uint16_t acqps)
-          {
-              EALLOW;
-/*
-//A
-0-2 Ir
-1-3 Iy
-2-1 Idc2
-3-5 Temp2
-4-8 Vref1.5
-//B
+{
+    EALLOW;
+    //---------- ADC-A ----------------------------------------------------
+    SET_SOC(AdcaRegs, 0, IR_IND_ADC_CH);        // A0   Idc1   (bridge 1)
+    SET_SOC(AdcaRegs, 1, IR_OUT_ADC_CH);        // A5   Iinp_R
+    SET_SOC(AdcaRegs, 2, IB_OUT_ADC_CH);        // A8   Iinp_B
+    SET_SOC(AdcaRegs, 3, VB_BYP_VLOAD_ADC_CH);  // A14  Vload  (selected by a link on the board, not by RLY11/RLY12)
+    SET_SOC(AdcaRegs, 4, TEMP1_ADC_CH);         // A9   Temp1
 
-0-2 Vy
-1-3 Vb
-2-10 Vdc
-3-8 Ref
+    //---------- ADC-B ----------------------------------------------------
+    SET_SOC(AdcbRegs, 0, VB_INV_ADC_CH);        // B3   Vinp_B
+    SET_SOC(AdcbRegs, 1, IY_OUT_ADC_CH);        // B8   Iinp_Y
+    SET_SOC(AdcbRegs, 3, VREF1P5_ADC_CH);       // B0   Vref1.5
+    SET_SOC(AdcbRegs, 4, TEMP3_ADC_CH);         // B1   Temp3
 
-//C
-0-4 Ib
-1-2 Idc
-2-5 Ibat
-3-3 Iref
+    //---------- ADC-C ----------------------------------------------------
+    SET_SOC(AdccRegs, 0, IY_IND_ADC_CH);        // C5   Idc2   (bridge 2)
+    SET_SOC(AdccRegs, 1, VDCLINK_ADC_CH);       // C0   Vdc
+    SET_SOC(AdccRegs, 3, VBAT_ADC_CH);          // C2   Vbat
+    SET_SOC(AdccRegs, 4, TEMP2_ADC_CH);         // C8   Temp2
 
-//D
-0-14 Vr
-1-15 Temp1
+    //---------- ADC-D ----------------------------------------------------
+    SET_SOC(AdcdRegs, 0, VR_INV_ADC_CH);        // D14  Vinp_R
+    SET_SOC(AdcdRegs, 3, IBAT_ADC_CH);          // D11  Ibat
 
-//E
-0-11 Vbat
-1-16 Vref
-*/
-                  AdcaRegs.ADCSOC0CTL.bit.CHSEL = 2;
-                  AdcaRegs.ADCSOC0CTL.bit.ACQPS = acqps;
-                  AdcaRegs.ADCSOC0CTL.bit.TRIGSEL = trig_sel;
+    //---------- ADC-E ----------------------------------------------------
+    SET_SOC(AdceRegs, 1, VY_INV_ADC_CH);        // E12  Vinp_Y
 
-                  AdcaRegs.ADCSOC1CTL.bit.CHSEL = 3;
-                  AdcaRegs.ADCSOC1CTL.bit.ACQPS = acqps;
-                  AdcaRegs.ADCSOC1CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcaRegs.ADCSOC2CTL.bit.CHSEL = 1;
-                  AdcaRegs.ADCSOC2CTL.bit.ACQPS = acqps;
-                  AdcaRegs.ADCSOC2CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcaRegs.ADCSOC3CTL.bit.CHSEL = 5;
-                  AdcaRegs.ADCSOC3CTL.bit.ACQPS = acqps;
-                  AdcaRegs.ADCSOC3CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcaRegs.ADCSOC4CTL.bit.CHSEL = 8;
-                  AdcaRegs.ADCSOC4CTL.bit.ACQPS = acqps;
-                  AdcaRegs.ADCSOC4CTL.bit.TRIGSEL = trig_sel;
-
-//----------ADC-B-------------------------------------------
-
-                  AdcbRegs.ADCSOC0CTL.bit.CHSEL = 2;
-                  AdcbRegs.ADCSOC0CTL.bit.ACQPS = acqps;
-                  AdcbRegs.ADCSOC0CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcbRegs.ADCSOC1CTL.bit.CHSEL = 3;
-                  AdcbRegs.ADCSOC1CTL.bit.ACQPS = acqps;
-                  AdcbRegs.ADCSOC1CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcbRegs.ADCSOC2CTL.bit.CHSEL = 10;
-                  AdcbRegs.ADCSOC2CTL.bit.ACQPS = acqps;
-                  AdcbRegs.ADCSOC2CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcbRegs.ADCSOC3CTL.bit.CHSEL = 8;
-                  AdcbRegs.ADCSOC3CTL.bit.ACQPS = acqps;
-                  AdcbRegs.ADCSOC3CTL.bit.TRIGSEL = trig_sel;
-
-//----ADC-C-----------------------------------------------------
-
-                  AdccRegs.ADCSOC0CTL.bit.CHSEL = 4;    //A5
-                  AdccRegs.ADCSOC0CTL.bit.ACQPS = acqps;
-                  AdccRegs.ADCSOC0CTL.bit.TRIGSEL = trig_sel;
-
-                  AdccRegs.ADCSOC1CTL.bit.CHSEL = 2;
-                  AdccRegs.ADCSOC1CTL.bit.ACQPS = acqps;
-                  AdccRegs.ADCSOC1CTL.bit.TRIGSEL = trig_sel;
-
-                  AdccRegs.ADCSOC2CTL.bit.CHSEL = 5;
-                  AdccRegs.ADCSOC2CTL.bit.ACQPS = acqps;
-                  AdccRegs.ADCSOC2CTL.bit.TRIGSEL = trig_sel;
-
-                  AdccRegs.ADCSOC3CTL.bit.CHSEL = 3;
-                  AdccRegs.ADCSOC3CTL.bit.ACQPS = acqps;
-                  AdccRegs.ADCSOC3CTL.bit.TRIGSEL = trig_sel;
-//D ADC-----------------------------------------------------------------------
-                  AdcdRegs.ADCSOC0CTL.bit.CHSEL = 14;    //A5
-                  AdcdRegs.ADCSOC0CTL.bit.ACQPS = acqps;
-                  AdcdRegs.ADCSOC0CTL.bit.TRIGSEL = trig_sel;
-
-                  AdcdRegs.ADCSOC1CTL.bit.CHSEL = 15;
-                  AdcdRegs.ADCSOC1CTL.bit.ACQPS = acqps;
-                  AdcdRegs.ADCSOC1CTL.bit.TRIGSEL = trig_sel;
-//E ADC -----------------------------------------------------------------------
-                  AdceRegs.ADCSOC0CTL.bit.CHSEL = 11;    //A5
-                  AdceRegs.ADCSOC0CTL.bit.ACQPS = acqps;
-                  AdceRegs.ADCSOC0CTL.bit.TRIGSEL = trig_sel;
-
-                  AdceRegs.ADCSOC1CTL.bit.CHSEL = 16;
-                  AdceRegs.ADCSOC1CTL.bit.ACQPS = acqps;
-                  AdceRegs.ADCSOC1CTL.bit.TRIGSEL = trig_sel;
-//-----------------------------------------------------------------------
-                  AdcaRegs.ADCINTSEL1N2.bit.INT1E = 1;
-                  AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 4;
-                  EDIS;
-    }
+    //---------- End of conversion interrupt --------------------------------
+    AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 4;      // EOC4 on ADC-A
+    AdcaRegs.ADCINTSEL1N2.bit.INT1E   = 1;
+    AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1;
+    EDIS;
+}
 
 //----------------------------------------------------------------------------
 //          SPI-A -> 25LC512 EEPROM

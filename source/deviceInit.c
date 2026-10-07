@@ -249,6 +249,7 @@ for(i=0;i<32;i++)
             setLowPassFilter(&lpf_vload, (100.0*SAMPLING_TIME), (0.0));
             setLowPassFilter(&lpf_temp1, (100.0*SAMPLING_TIME), (0.0));
             setLowPassFilter(&lpf_temp2, (100.0*SAMPLING_TIME), (0.0));
+            setLowPassFilter(&lpf_temp3, (100.0*SAMPLING_TIME), (0.0));
             setLowPassFilter(&lpf_vref, (100.0*SAMPLING_TIME), (0.0));
             setLowPassFilter(&lpf_iref, (100.0*SAMPLING_TIME), (0.0));
 

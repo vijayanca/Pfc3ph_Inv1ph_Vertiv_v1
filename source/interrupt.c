@@ -101,28 +101,31 @@ interrupt void AdcISR(void) {
     if(piCounter<PI_Interval) piCounter++;
     else {piCounter = 0; doPID = TRUE; }
 
-    AnalogInput1 = AdcdResultRegs.ADCRESULT0; //0-14 Vr
-    AnalogInput2 = AdcbResultRegs.ADCRESULT0; //0-2 Vy
-    AnalogInput3 = AdcbResultRegs.ADCRESULT1; //1-3 Vb
+    // Common Controller v2, SOC map in BoardInit.c setupADC(); AnalogInputN
+    // follow the labels in RectParams.h (ADC / SOC / channel)
+    AnalogInput1  = AdcdResultRegs.ADCRESULT0; // D 0  D14  Vinp_R
+    AnalogInput2  = AdceResultRegs.ADCRESULT1; // E 1  E12  Vinp_Y
+    AnalogInput3  = AdcbResultRegs.ADCRESULT0; // B 0  B3   Vinp_B
 
-    AnalogInput4 = AdcaResultRegs.ADCRESULT0; //0-2 Ir
-    AnalogInput5 = AdcaResultRegs.ADCRESULT1; //1-3 Iy
-    AnalogInput6  = AdccResultRegs.ADCRESULT0; //0-4 Ib
+    AnalogInput4  = AdcaResultRegs.ADCRESULT1; // A 1  A5   Iinp_R
+    AnalogInput5  = AdcbResultRegs.ADCRESULT1; // B 1  B8   Iinp_Y
+    AnalogInput6  = AdcaResultRegs.ADCRESULT2; // A 2  A8   Iinp_B
 
-    AnalogInput7 = AdcbResultRegs.ADCRESULT2; //2-10 Vdc
-    AnalogInput8 = AdccResultRegs.ADCRESULT1; //1-2 Idc
-    AnalogInput9 = AdcaResultRegs.ADCRESULT2; //2-1 Idc2
-    AnalogInput10 = AdceResultRegs.ADCRESULT0; //0-11 Vbat
-    AnalogInput11 = AdccResultRegs.ADCRESULT2; //2-5 Ibat
-    AnalogInput12 = AdceResultRegs.ADCRESULT1; //1-16 Vref
-    AnalogInput13 = AdccResultRegs.ADCRESULT3; //3-3 Iref
-    AnalogInput14 = AdcdResultRegs.ADCRESULT1; //1-15 Temp1
-    AnalogInput15 = AdcaResultRegs.ADCRESULT3; //3-5 Temp2
-    AnalogInput16 = AdcbResultRegs.ADCRESULT3; //3-8 Ref
-    AnalogInput17 = AdcaResultRegs.ADCRESULT4; //4-8 Vref1.5
+    AnalogInput7  = AdccResultRegs.ADCRESULT1; // C 1  C0   Vdc
+    AnalogInput8  = AdcaResultRegs.ADCRESULT0; // A 0  A0   Idc1 (bridge 1)
+    AnalogInput9  = AdccResultRegs.ADCRESULT0; // C 0  C5   Idc2 (bridge 2)
+    AnalogInput10 = AdccResultRegs.ADCRESULT3; // C 3  C2   Vbat
+    AnalogInput11 = AdcdResultRegs.ADCRESULT3; // D 3  D11  Ibat
+    AnalogInput12 = AdcaResultRegs.ADCRESULT3; // A 3  A14  Vload
+    AnalogInput13 = 0;                         //           Vref (external) - not on this board
+    AnalogInput14 = 0;                         //           Iref (external) - not on this board
+    AnalogInput15 = AdcbResultRegs.ADCRESULT3; // B 3  B0   Vref1.5
+    AnalogInput16 = AdcaResultRegs.ADCRESULT4; // A 4  A9   Temp1
+    AnalogInput17 = AdccResultRegs.ADCRESULT4; // C 4  C8   Temp2
+    AnalogInput18 = AdcbResultRegs.ADCRESULT4; // B 4  B1   Temp3 (display only)
     adcSamples++;
 
-    lpf_bias.u = (float) (AnalogInput17) * FLOAT_CONVERTER_AC;
+    lpf_bias.u = (float) (AnalogInput15) * FLOAT_CONVERTER_AC;
      LOWPASSFILTER(lpf_bias);
 
   //   AnalogInput8 = 1200;AnalogInput9 = 1300;
@@ -140,7 +143,8 @@ interrupt void AdcISR(void) {
      pll_omega = phaseLockedLoopB(&pllGrid);
 
 //--------------------------------------------------------------------------
-          if( (pllGrid.theta.sin_val>= 0.0) && (prev_valueR< 0.0) )
+          if( (lpf_vInpR.y>= 0.0) && (prev_valueR< 0.0) )
+          //if( (pllGrid.theta.sin_val>= 0.0) && (prev_valueR< 0.0) )
                  {
                     STOP_TIMER0;
                     LOAD_TIMER0(AlphaCount);
@@ -178,8 +182,8 @@ interrupt void AdcISR(void) {
                             }
                         }
                  }
-            prev_valueR = pllGrid.theta.sin_val;
-//            prev_valueR = lpf_vInpR.y;
+//            prev_valueR = pllGrid.theta.sin_val;
+            prev_valueR = lpf_vInpR.y;
 
             if( (pllGrid.theta.sin_val<= 0.0) && (prev_valueY> 0.0) )
                  {
@@ -228,14 +232,21 @@ interrupt void AdcISR(void) {
      lpf_vbat.u = (float)AnalogInput10 * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_vbat);
 
-     lpf_temp1.u = (float)AnalogInput14 * FLOAT_CONVERTER_DC;
-     lpf_temp2.u = (float)AnalogInput15 * FLOAT_CONVERTER_DC;
+     lpf_vload.u = (float)AnalogInput12 * FLOAT_CONVERTER_DC;
+     LOWPASSFILTER(lpf_vload);
+
+     lpf_temp1.u = (float)AnalogInput16 * FLOAT_CONVERTER_DC;
+     lpf_temp2.u = (float)AnalogInput17 * FLOAT_CONVERTER_DC;
+     lpf_temp3.u = (float)AnalogInput18 * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_temp1);
      LOWPASSFILTER(lpf_temp2);
+     LOWPASSFILTER(lpf_temp3);
 //---------------------------------------------------------------------------
 
-     lpf_vref.u = (float)AnalogInput12 * FLOAT_CONVERTER_DC;
-     lpf_iref.u = (float)AnalogInput13 * FLOAT_CONVERTER_DC;
+     // External V/I reference inputs are not on the Common Controller v2
+     // (AnalogInput13/14 = 0): use ExtRefEnable = 0.
+     lpf_vref.u = (float)AnalogInput13 * FLOAT_CONVERTER_DC;
+     lpf_iref.u = (float)AnalogInput14 * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_vref);
      LOWPASSFILTER(lpf_iref);
 
@@ -362,8 +373,18 @@ interrupt void SCIBRx_ISR(void) {
 
     N16 temp_char1 = 0;
 
-    errorRx = ScibRegs.SCIRXST.bit.RXERROR;
-    if (!errorRx)
+    // SCIB errors (framing / break on an idle or unconnected RS485 #1) are handled
+    // here: count, flush and software-reset the receiver. They must not touch
+    // errorRx, which makes main() re-initialise SCIA.
+    if (ScibRegs.SCIRXST.bit.RXERROR)
+    {
+        temp_char1 = ScibRegs.SCIRXBUF.all;     // discard
+        errorRx1++;
+        ScibRegs.SCICTL1.bit.SWRESET = 0;       // clears RXERROR / BRKDT / FE / OE
+        ScibRegs.SCICTL1.bit.SWRESET = 1;
+        live_frame1 = FALSE;
+    }
+    else
     {
         temp_char1 = ScibRegs.SCIRXBUF.all;
         rxbuffer1 = &rx_buffer1[0];
@@ -397,7 +418,7 @@ interrupt void ePWM1_ISR(void) {
 
 }
 
-#define BIASCHANNEL AnalogInput17
+#define BIASCHANNEL AnalogInput15       // Vref1.5 (B0) on the Common Controller v2
 //volatile N16 zcdCount1 = 0;
 N16 ch = 0;
 

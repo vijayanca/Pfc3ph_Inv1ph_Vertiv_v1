@@ -23,15 +23,18 @@ N16 DObitAddress[] = {100, 101, 102, 104, 107, 116, 122, 118};
 #define NUM_DOBITS  (sizeof(DObitAddress)/sizeof(DObitAddress[0]))
 
 // Send a frame on the port the request came in on.
-// Port A drives the RS-485 enable line; port B does not (same as pi_com1).
+// Common Controller v2: both ports are RS-485 and drive their enable line
+// (port A: GPIO34, port B: GPIO40). scix_xmit waits for TXEMPTY per character.
 static void port_xmit(N16 portNumber, N8 *buf, N16 n)
 {
     N16 ix;
 
     if(portNumber == MB_PORT_B)
     {
+        EnableTX1();
         for(ix=0;ix<n;ix++)
             scib_xmit(buf[ix]);
+        DisableTX1();
     }
     else
     {
@@ -292,7 +295,9 @@ Uint16  pi_com(void)
                     ArrayParamsI[BASE_RTC + 5] = ( (N16) *(rxbuffer+17)<<8) | *(rxbuffer+18);
                     ArrayParamsI[BASE_RTC + 6] = ( (N16) *(rxbuffer+19)<<8) | *(rxbuffer+20);
 
+#if RTC_PRESENT
                     SetTime(&ArrayParamsI[BASE_RTC]);
+#endif
 
                     tx_count=8;
                     break;

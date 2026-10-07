@@ -87,7 +87,7 @@
                         </toolChain>
                     </folderInfo>
                     <sourceEntries>
-                        <entry excluding="28p55x_generic_ram_lnk.cmd|28p55x_generic_flash_lnk.cmd" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+                        <entry excluding="source/adc.c|28p55x_RAM_combined_lnk.cmd|28p55x_generic_ram_lnk.cmd" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
                     </sourceEntries>
                 </configuration>
             </storageModule>
@@ -179,7 +179,7 @@
                         </toolChain>
                     </folderInfo>
                     <sourceEntries>
-                        <entry excluding="source/adc.c|driverlib_coff.lib|28p55x_generic_ram_lnk.cmd|28p55x_RAM_combined_lnk.cmd|28035_RAM_lnk.cmd" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+                        <entry excluding="source/mcp79522.c|source/adc.c|driverlib_coff.lib|28p55x_generic_ram_lnk.cmd|28p55x_RAM_combined_lnk.cmd|28035_RAM_lnk.cmd" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
                     </sourceEntries>
                 </configuration>
             </storageModule>

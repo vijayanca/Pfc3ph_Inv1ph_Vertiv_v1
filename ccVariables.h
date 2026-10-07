@@ -114,7 +114,8 @@ CCEXTERN    Uint16  eventCounter INIT0;
 CCEXTERN    Uint16  msgCounter INIT0;
 CCEXTERN    Uint16  CANDataAddress INIT0;
 CCEXTERN    Uint16  CANRXAddress INIT0;
-CCEXTERN    Uint16  errorRx INIT0;
+CCEXTERN    Uint16  errorRx INIT0;      // SCIA (RS485 #2) receive error
+CCEXTERN    Uint16  errorRx1 INIT0;     // SCIB (RS485 #1) receive error count
 //CCEXTERN    Uint16  LedFlag INIT0;
 
 CCEXTERN    Uint16  R_msCount INIT0;
@@ -391,6 +392,7 @@ CCEXTERN    LPF lpf_vref;
 CCEXTERN    LPF lpf_iref;
 CCEXTERN    LPF lpf_temp1;
 CCEXTERN    LPF lpf_temp2;
+CCEXTERN    LPF lpf_temp3;      // ambient (Common Controller v2, B1)
 CCEXTERN    LPF lpf_ifback;
 CCEXTERN    LPF lpf_ibatfback;
 CCEXTERN    LPF lpf_remVref;

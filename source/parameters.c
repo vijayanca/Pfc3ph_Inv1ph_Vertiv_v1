@@ -79,7 +79,7 @@ const PARAM defaultValues[] = {
                                {0.1,5000,721}, /* VloadSF 174 */
                                {0.1,5000,200}, /* Temp1SF 175 */
                                {0.1,5000,200}, /* Temp2SF 176 */
-                               {0.1,5000,1500}, /* extTemp1SF 177 */
+                               {0.1,5000,200}, /* Temp3SF 177 (was extTemp1SF, unused) */
                                {0.1,5000,1500}, /* extTemp2SF 178 */
                                {-120.0,120.0,-30.0}, /* SyncAdjustAngle 179 */
                                {-3.0,3.0,0.5}, /* Bridge2AngleAdjust 180 */

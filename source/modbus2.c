@@ -218,7 +218,9 @@ Uint16  pi_com1(void)
                     ArrayParamsI[BASE_RTC + 5] = ( (N16) *(rxbuffer1+17)<<8) | *(rxbuffer1+18);
                     ArrayParamsI[BASE_RTC + 6] = ( (N16) *(rxbuffer1+19)<<8) | *(rxbuffer1+20);
 
+#if RTC_PRESENT
                     SetTime(&ArrayParamsI[BASE_RTC]);
+#endif
 
                     tx_count=8;
                     break;
@@ -296,10 +298,12 @@ Uint16  pi_com1(void)
 				*(rxbuffer1+tx_count-1) =  crc_act >>8;
 				*(rxbuffer1+tx_count-2)= crc_act & 0xff;
 				
+				EnableTX1();    // RS485 #1 (SCIB) transmit, GPIO40
 				for(i=0;i<tx_count;i++)
 				{
 					scib_xmit( (char) *(rxbuffer1+i));
 				}
+				DisableTX1();   // scib_xmit waited for TXEMPTY
 				live_frame1    = FALSE;
 			}
 
