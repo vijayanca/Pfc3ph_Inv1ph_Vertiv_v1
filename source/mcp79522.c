@@ -82,6 +82,9 @@ void ReadTime(void)
 {
 	N8 tmpBuf[12] = {0};
 
+#if !RTC_PRESENT
+	return;     // no RTC: keep RTCSecond..RTCYear as set (compile time / Modbus)
+#endif
 		RTCCReadArray(0,tmpBuf,10);
 		
 		RTCSecond = RTC.Second = ((tmpBuf[POS_SEC] & 0x70) >> 4) * 10 + (tmpBuf[POS_SEC] & 0x0F);
@@ -159,6 +162,10 @@ void RTCCReadArray(BYTE dwAddress, BYTE *vData, BYTE wLength)
 
     if(vData == NULL || wLength == 0)
         return;
+#if !RTC_PRESENT
+    for(count=0;count<wLength;count++) *vData++ = 0;    // no RTC on this board
+    return;
+#endif
     Nop();
     Nop();
     ENABLE_RTC();
@@ -191,6 +198,9 @@ void	RTCwriteByte(BYTE addr, BYTE val)
 	 N16 dt = 0;
 	 N16 _tmp;
 
+#if !RTC_PRESENT
+	return;     // no RTC on this board
+#endif
 	ENABLE_RTC();
 
     	SpiaRegs.SPITXBUF = SPI_RTCC_WRITE;//rtc write
@@ -222,7 +232,10 @@ void RTCCWriteArray(BYTE addr, BYTE* vData, BYTE wLen)
 
     if(vData == NULL || wLen == 0)
         return;
-    
+#if !RTC_PRESENT
+    return;     // no RTC on this board
+#endif
+
    	ENABLE_RTC();
 
     	SpiaRegs.SPITXBUF = SPI_RTCC_WRITE;//rtc write
@@ -251,7 +264,10 @@ void RTCCWriteArray(BYTE addr, BYTE* vData, BYTE wLen)
 N8	ReadRTCCStatus(void)
 	{
 	N8 Dummy1;
-    
+
+#if !RTC_PRESENT
+    return 0;   // no RTC on this board
+#endif
     ENABLE_RTC(); // Activate chip select
 
   		SpiaRegs.SPITXBUF = SPI_RTCC_SRREAD;    /*  read Status  */
@@ -274,6 +290,10 @@ void eepromReadArray(BYTE addr, BYTE *vData, BYTE wLength)
 
     // Ignore operations when the destination is NULL or nothing to read
     if(vData == NULL || wLength == 0) return;
+#if !RTC_PRESENT
+    while(wLength--) *vData++ = 0;  // no RTC (and no RTC EEPROM) on this board
+    return;
+#endif
     ENABLE_RTC();
 
     // Send READ opcode
@@ -308,6 +328,9 @@ void eepromWriteArray(BYTE addr, BYTE *vData, WORD wLen)
 	// Do nothing if no data to process
 	if(wLen == 0u)
 		return;
+#if !RTC_PRESENT
+	return;     // no RTC (and no RTC EEPROM) on this board
+#endif
 	RTCCWriteEnable();
 	ENABLE_RTC();
 
@@ -339,7 +362,10 @@ void eepromWriteArray(BYTE addr, BYTE *vData, WORD wLen)
 void RTCCWriteEnable(void)
 	{
 		BYTE dummy;
-		
+
+#if !RTC_PRESENT
+		return;     // no RTC on this board
+#endif
 		ENABLE_RTC();
 
 	    // Send instruction
@@ -354,6 +380,9 @@ void RTCCWriteEnable(void)
 void RTCCWriteDisable(void)
 	{
 		BYTE dummy;
+#if !RTC_PRESENT
+		return;     // no RTC on this board
+#endif
 		ENABLE_RTC();
 
 	    SpiaRegs.SPITXBUF = SPI_RTCC_EEWRDI;

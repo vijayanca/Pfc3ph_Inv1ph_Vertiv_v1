@@ -19,6 +19,7 @@ Date	| Modified |  		Description of Modification 		| Bug Number |
 #include "../ccVariables.h"
 #include "string.h"
 #include "../include/device.h"
+#include "board_pin_map.h"
 
 #define	    CARD_ID			1010
 #define	    SWVERSION_SET	126
@@ -163,32 +164,32 @@ void InitVariables(void) {
         ArrayParamsF[i]= 0.0;
     }
 
-      DIpins[0]=  227;
-      DIpins[1]=  236;
-      DIpins[2]=  230;
-      DIpins[3]=  253;
-      DIpins[4]=  247;
-      DIpins[5]=  20;
-      DIpins[6]=  50;
-      DIpins[7]=  51;
-      DIpins[8]=  52;
-      DIpins[9]=  53;
-      DIpins[10]=  54;
-      DIpins[11]=  55;
-      DIpins[12]=  21;
+      // Common Controller v2: DI01..DI10 (board_pin_map.h). DI11/DI12 do not
+      // exist on this board and are no longer scanned (interrupt.c).
+      DIpins[0]=  DI1_GPIO;     // GPIO247
+      DIpins[1]=  DI2_GPIO;     // GPIO20
+      DIpins[2]=  DI3_GPIO;     // GPIO21
+      DIpins[3]=  DI4_GPIO;     // GPIO63
+      DIpins[4]=  DI5_GPIO;     // GPIO48
+      DIpins[5]=  DI6_GPIO;     // GPIO49
+      DIpins[6]=  DI7_GPIO;     // GPIO50
+      DIpins[7]=  DI8_GPIO;     // GPIO51
+      DIpins[8]=  DI9_GPIO;     // GPIO52
+      DIpins[9]=  DI10_GPIO;    // GPIO53
 
-      DOpins[0]=  60;
-      DOpins[1]=  13;
-      DOpins[2]=  24;
-      DOpins[3]=  25;
-      DOpins[4]=  26;
-      DOpins[5]=  27;
-      DOpins[6]=  32;
-      DOpins[7]=  12;
-      DOpins[8]=  22;
-      DOpins[9]=  44;
-      DOpins[10]=  61;
-      DOpins[11]=  59;
+      // RLY_01..RLY_12
+      DOpins[0]=  RLY1_GPIO;    // GPIO60
+      DOpins[1]=  RLY2_GPIO;    // GPIO33
+      DOpins[2]=  RLY3_GPIO;    // GPIO24
+      DOpins[3]=  RLY4_GPIO;    // GPIO25
+      DOpins[4]=  RLY5_GPIO;    // GPIO26
+      DOpins[5]=  RLY6_GPIO;    // GPIO27
+      DOpins[6]=  RLY7_GPIO;    // GPIO32
+      DOpins[7]=  RLY8_GPIO;    // GPIO58
+      DOpins[8]=  RLY9_GPIO;    // GPIO22
+      DOpins[9]=  RLY10_GPIO;   // GPIO44
+      DOpins[10]=  RLY11_GPIO;  // GPIO61
+      DOpins[11]=  RLY12_GPIO;  // GPIO59
 
       InitStructs();
 

@@ -96,7 +96,7 @@ interrupt void AdcISR(void) {
         AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1; //clear INT1 flag
     }
 
-    GPIO_WritePin(60, 1); //toggling GPIO
+    // (ISR timing marker on GPIO60 removed: GPIO60 is RLY1 on the Common Controller v2)
     temp_AdcIsrCount++;
     if(piCounter<PI_Interval) piCounter++;
     else {piCounter = 0; doPID = TRUE; }
@@ -248,8 +248,6 @@ interrupt void AdcISR(void) {
      vol_Yph = (lpf_vInpY.y - lpf_vInpR.y) * 0.33333333333f;
      vol_Bph = (lpf_vInpB.y - lpf_vInpY.y) * 0.33333333333f;
      rmsCal();
-
-     GPIO_WritePin(60, 0);
 
      //-----------------------------------------------------------------------------
           saveCounter++;
@@ -736,8 +734,8 @@ __interrupt void cpu_timer2_isr(void)
       checkDI(DIpins[7],DI8timer,DIDELAY);
       checkDI(DIpins[8],DI9timer,DIDELAY);
       checkDI(DIpins[9],DI10timer,DIDELAY);
-      checkDI(DIpins[10],DI11timer,DIDELAY);
-      checkDI(DIpins[11],DI12timer,DIDELAY);
+      // DI11 / DI12: not on the Common Controller v2 (DI01..DI10 only); timers stay 0
+
 
     if(SystemFlag.bit.POWERINGUP)
     {

@@ -272,8 +272,9 @@ extern "C"
 // To use INTOSC as the clock source, comment the #define USE_PLL_SRC_XTAL,
 // and uncomment the #define USE_PLL_SRC_INTOSC
 //
-#define USE_PLL_SRC_XTAL
-//#define USE_PLL_SRC_INTOSC
+// Common Controller v2: no crystal (X1/X2 = GPIO19/18 carry MCANB) -> INTOSC2
+//#define USE_PLL_SRC_XTAL
+#define USE_PLL_SRC_INTOSC
 
 
 #if defined(USE_PLL_SRC_XTAL)

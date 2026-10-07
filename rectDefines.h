@@ -64,22 +64,30 @@ typedef signed char S8;
                         __asm(" EDIS")
 
 
+// Common Controller v2: no RTC (MCP79522) on the board. GPIO40 is now the
+// RS485 #1 (SCIB) TXEN, so the RTC chip-select macros must not touch it.
+// Set RTC_PRESENT to 1 (and give the RTC its own /CS) on a board with an RTC.
+#define RTC_PRESENT         0
+
+#if RTC_PRESENT
 #define ENABLE_RTC()       GpioDataRegs.GPBSET.bit.GPIO57  = 1;   \
                            GpioDataRegs.GPBCLEAR.bit.GPIO40 = 1
 #define DISABLE_RTC()      GpioDataRegs.GPBSET.bit.GPIO40 = 1
+#else
+#define ENABLE_RTC()       GpioDataRegs.GPBSET.bit.GPIO57  = 1    // EEPROM deselected only
+#define DISABLE_RTC()      Nop()
+#endif
 
-#define ENABLE_EEPR()      GpioDataRegs.GPBSET.bit.GPIO40 = 1;   \
-                           GpioDataRegs.GPBCLEAR.bit.GPIO57 = 1
+#define ENABLE_EEPR()      GpioDataRegs.GPBCLEAR.bit.GPIO57 = 1   // 25LC512 /CS (GPIO57)
 #define DISABLE_EEPR()     GpioDataRegs.GPBSET.bit.GPIO57 = 1
 
-#define DISABLE_SPI()      GpioDataRegs.GPBSET.bit.GPIO57 = 1; \
-                           GpioDataRegs.GPBSET.bit.GPIO40 = 1
+#define DISABLE_SPI()      GpioDataRegs.GPBSET.bit.GPIO57 = 1
 
-#define EnableTX()  GpioDataRegs.GPBSET.bit.GPIO34  = 1 // TXEN cleared
-#define DisableTX() GpioDataRegs.GPBCLEAR.bit.GPIO34    = 1 // TXEN cleared
+#define EnableTX()  GpioDataRegs.GPBSET.bit.GPIO34  = 1     // RS485 #2 (SCIA) TXEN = transmit
+#define DisableTX() GpioDataRegs.GPBCLEAR.bit.GPIO34    = 1 // RS485 #2 (SCIA) TXEN = receive
 
-#define EnableRLY1()   GpioDataRegs.GPBSET.bit.GPIO33  = 1
-#define DisableRLY1()  GpioDataRegs.GPBCLEAR.bit.GPIO33    = 1
+#define EnableRLY1()   GpioDataRegs.GPBSET.bit.GPIO60  = 1  // RLY1 = GPIO60 (board_pin_map.h)
+#define DisableRLY1()  GpioDataRegs.GPBCLEAR.bit.GPIO60    = 1
 
 //#define RESET_FAULTS()  Nop()
 

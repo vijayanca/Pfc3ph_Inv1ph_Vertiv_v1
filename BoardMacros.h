@@ -19,8 +19,9 @@
 #define EnableTX()  GpioDataRegs.GPBSET.bit.GPIO34  = 1 // TXEN cleared
 #define DisableTX() GpioDataRegs.GPBCLEAR.bit.GPIO34    = 1 // TXEN cleared
 
-#define EnableRLY1()   GpioDataRegs.GPBSET.bit.GPIO33  = 1
-#define DisableRLY1()  GpioDataRegs.GPBCLEAR.bit.GPIO33    = 1
+// Not included anywhere; the active definitions are in rectDefines.h.
+#define EnableRLY1()   GpioDataRegs.GPBSET.bit.GPIO60  = 1    // RLY1 = GPIO60 (board_pin_map.h)
+#define DisableRLY1()  GpioDataRegs.GPBCLEAR.bit.GPIO60    = 1
 
 
 

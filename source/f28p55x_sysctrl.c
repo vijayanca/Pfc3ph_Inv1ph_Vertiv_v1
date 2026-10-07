@@ -78,8 +78,10 @@
 // To use INTOSC as the clock source, comment the #define USE_PLL_SRC_XTAL,
 // and uncomment the #define USE_PLL_SRC_INTOSC
 //
-#define USE_PLL_SRC_XTAL
-//#define USE_PLL_SRC_INTOSC
+// Common Controller v2: no crystal (X1/X2 = GPIO19/18 carry MCANB), so the
+// PLL runs from INTOSC2: 10 MHz * 30 / (1 * 1 * 2) = 150 MHz, same SYSCLK.
+//#define USE_PLL_SRC_XTAL
+#define USE_PLL_SRC_INTOSC
 
 //
 // InitSysCtrl - Initialization of system resources.

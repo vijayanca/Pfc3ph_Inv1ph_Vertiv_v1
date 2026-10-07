@@ -38,6 +38,7 @@
 #include "../ccVariables.h"
 #include "device.h"
 #include "math.h"
+#include "board_pin_map.h"
 
 
 extern __interrupt void MCANIntr1ISR(void);
@@ -649,30 +650,31 @@ if(DI_ModeSelect)
 
 void updateRelays(void)
 {
-    if(RelayFlag & 0x0001)    GPIO_WritePin(60, 1);
-    else                    GPIO_WritePin(60, 0);
-    if(RelayFlag & 0x0002)    GPIO_WritePin(33, 1);
-    else                    GPIO_WritePin(33, 0);
-    if(RelayFlag & 0x0004)    GPIO_WritePin(24, 1);
-    else                    GPIO_WritePin(24, 0);
-    if(RelayFlag & 0x0008)    GPIO_WritePin(25, 1);
-    else                    GPIO_WritePin(25, 0);
-    if(RelayFlag & 0x0010)    GPIO_WritePin(32, 1);
-    else                    GPIO_WritePin(32, 0);
-    if(RelayFlag & 0x0020)    GPIO_WritePin(58, 1);
-    else                    GPIO_WritePin(58, 0);
-    if(RelayFlag & 0x0040)    GPIO_WritePin(44, 1);
-    else                    GPIO_WritePin(44, 0);
-    if(RelayFlag & 0x0080)    GPIO_WritePin(61, 1);
-    else                    GPIO_WritePin(61, 0);
-    if(RelayFlag & 0x0100)    GPIO_WritePin(59, 1);
-    else                    GPIO_WritePin(59, 0);
-    if(RelayFlag & 0x0200)    GPIO_WritePin(15, 1);
-    else                    GPIO_WritePin(15, 0);
-    if(RelayFlag & 0x0400)    GPIO_WritePin(14, 1);
-    else                    GPIO_WritePin(14, 0);
-    if(RelayFlag & 0x0800)    GPIO_WritePin(26, 1);
-    else                    GPIO_WritePin(26, 0);
+    // Common Controller v2: RelayFlag bit n -> RLY_(n+1) (board_pin_map.h)
+    if(RelayFlag & 0x0001)    GPIO_WritePin(RLY1_GPIO, 1);
+    else                    GPIO_WritePin(RLY1_GPIO, 0);
+    if(RelayFlag & 0x0002)    GPIO_WritePin(RLY2_GPIO, 1);
+    else                    GPIO_WritePin(RLY2_GPIO, 0);
+    if(RelayFlag & 0x0004)    GPIO_WritePin(RLY3_GPIO, 1);
+    else                    GPIO_WritePin(RLY3_GPIO, 0);
+    if(RelayFlag & 0x0008)    GPIO_WritePin(RLY4_GPIO, 1);
+    else                    GPIO_WritePin(RLY4_GPIO, 0);
+    if(RelayFlag & 0x0010)    GPIO_WritePin(RLY5_GPIO, 1);
+    else                    GPIO_WritePin(RLY5_GPIO, 0);
+    if(RelayFlag & 0x0020)    GPIO_WritePin(RLY6_GPIO, 1);
+    else                    GPIO_WritePin(RLY6_GPIO, 0);
+    if(RelayFlag & 0x0040)    GPIO_WritePin(RLY7_GPIO, 1);
+    else                    GPIO_WritePin(RLY7_GPIO, 0);
+    if(RelayFlag & 0x0080)    GPIO_WritePin(RLY8_GPIO, 1);
+    else                    GPIO_WritePin(RLY8_GPIO, 0);
+    if(RelayFlag & 0x0100)    GPIO_WritePin(RLY9_GPIO, 1);
+    else                    GPIO_WritePin(RLY9_GPIO, 0);
+    if(RelayFlag & 0x0200)    GPIO_WritePin(RLY10_GPIO, 1);
+    else                    GPIO_WritePin(RLY10_GPIO, 0);
+    if(RelayFlag & 0x0400)    GPIO_WritePin(RLY11_GPIO, 1);
+    else                    GPIO_WritePin(RLY11_GPIO, 0);
+    if(RelayFlag & 0x0800)    GPIO_WritePin(RLY12_GPIO, 1);
+    else                    GPIO_WritePin(RLY12_GPIO, 0);
 
 }
 
