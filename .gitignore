@@ -1,0 +1,14 @@
+# CCS build output
+Debug/
+Release/
+*.obj
+*.out
+*.map
+*.pp
+*.d
+.launches/
+
+# local IDE / tool settings
+.theia/
+.claude/
+.mcp.json
