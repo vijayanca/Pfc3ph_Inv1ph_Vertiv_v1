@@ -35,6 +35,10 @@ volatile N16 counterValueB = 0;
 float volatile prev_valueR = 0;
 float volatile prev_valueY = 0;
 
+volatile N16 simBalance = 0;        // 1 = use simulated Idc1/Idc2 counts
+volatile N16 simIdc1Count = 1200;   // raw ADC counts (0..4095)
+volatile N16 simIdc2Count = 1300;
+
 
 #pragma CODE_SECTION(AdcISR, ".TI.ramfunc");
 
@@ -128,7 +132,13 @@ interrupt void AdcISR(void) {
     lpf_bias.u = (float) (AnalogInput15) * FLOAT_CONVERTER_AC;
      LOWPASSFILTER(lpf_bias);
 
-  //   AnalogInput8 = 1200;AnalogInput9 = 1300;
+     // Balancing test: set simBalance = 1 from the debugger to replace the
+     // Idc1/Idc2 ADC counts with simIdc1Count/simIdc2Count. Leave 0 in service.
+     if(simBalance)
+     {
+         AnalogInput8 = simIdc1Count;
+         AnalogInput9 = simIdc2Count;
+     }
 
      lpf_vInpR.u = (float) (AnalogInput1 - vrOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
      lpf_vInpY.u = (float) (AnalogInput2 - vyOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
