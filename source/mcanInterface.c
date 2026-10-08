@@ -37,7 +37,7 @@
 #define MCAN_FIFO_1_ELEM_SIZE           (MCAN_ELEM_SIZE_64BYTES)
 #define MCAN_RX_BUFF_NUM                (0U)
 #define MCAN_RX_BUFF_ELEM_SIZE          (MCAN_ELEM_SIZE_64BYTES)
-#define MCAN_TX_BUFF_SIZE               (NUM_OF_MSG)
+#define MCAN_TX_BUFF_SIZE               (2U)    // 0 = paralleling, 1 = display
 #define MCAN_TX_FQ_SIZE                 (0U)
 #define MCAN_TX_BUFF_ELEM_SIZE          (MCAN_ELEM_SIZE_64BYTES)
 #define MCAN_TX_EVENT_SIZE              (0U)
@@ -50,6 +50,7 @@
 #define MCAN_TX_EVENT_START_ADDR        (MCAN_TX_BUFF_START_ADDR + (MCAN_getMsgObjSize(MCAN_TX_BUFF_ELEM_SIZE) * 4U * (MCAN_TX_BUFF_SIZE + MCAN_TX_FQ_SIZE)))
 
 __interrupt void MCANIntr1ISR(void);
+void DisplayBroadcast(void);
 
 
 unsigned int num = 0;
@@ -111,7 +112,125 @@ void    MCANBusProcessing(void)
 
                 oldmsCount1 = milliseconds;
           }
+
+       DisplayBroadcast();
       }
+
+/*------------------------------------------------------------------------------
+ Display broadcast on CAN-A
+ Classic CAN, 11-bit ID, DLC 8, little-endian. The display decodes by ID.
+ ID = DISP_BASE_ID + (unit - 1) * DISP_UNIT_STEP + offset
+     unit 1: 0x100..0x13F, unit 2: 0x140..0x17F
+ Float frames : bytes 0-3 = value A (float32), bytes 4-7 = value B (float32)
+ Flag frames  : four uint16 words, bytes 0-1, 2-3, 4-5, 6-7
+ One frame every DISP_FRAME_MS on TX buffer 1. The fast table runs
+ continuously; one slow (settings) frame is added after each fast round.
+------------------------------------------------------------------------------*/
+#define DISP_BASE_ID        0x100U
+#define DISP_UNIT_STEP      0x40U
+#define DISP_TXBUF          1U
+#define DISP_FRAME_MS       5U
+
+typedef struct { N16 ofs; float *a; float *b; } DISP_FLT;
+typedef struct { N16 ofs; int *w0; int *w1; int *w2; int *w3; } DISP_INT;
+
+// Fast group: measurements (offset 0x00..0x0A)
+static const DISP_FLT dispFast[] = {
+    {0x00, &VinpRY,      &VinpYB},
+    {0x01, &VinpBR,      &MainsFrequency},
+    {0x02, &IinpR,       &IinpY},
+    {0x03, &IinpB,       &Vdc},
+    {0x04, &Idc1,        &Idc2},
+    {0x05, &Vbat,        &Ibat},
+    {0x06, &LoadVoltage, &LoadCurrent},
+    {0x07, &IdcTotal,    &VdcRipple},
+    {0x08, &BattTemp,    &Temp2},
+    {0x09, &Temp3,       &kW_Total},
+    {0x0A, &kVA_Total,   &DC_kW},
+};
+
+// Fast group: status / alarm words (offset 0x0B..0x0C)
+static const DISP_INT dispFlags[] = {
+    {0x0B, &AlarmFlag1, &AlarmFlag2, &AlarmFlag3, &AlarmFlag4},
+    {0x0C, &AlarmFlag5, &AlarmFlag6, &AlarmFlag7, &opMode},
+};
+
+// Slow group: settings (offset 0x10..0x15)
+static const DISP_FLT dispSlow[] = {
+    {0x10, &VdcRef,          &IbatRef},
+    {0x11, &FloatVRef,       &BoostVRef},
+    {0x12, &EqualiseVRef,    &DGModeVRef},
+    {0x13, &FloatIbatRef,    &BoostIbatRef},
+    {0x14, &EqualiseIbatRef, &IdcRef},
+    {0x15, &VacHL,           &VacLL},
+};
+
+#define DISP_NFAST   (sizeof(dispFast)  / sizeof(dispFast[0]))
+#define DISP_NFLAGS  (sizeof(dispFlags) / sizeof(dispFlags[0]))
+#define DISP_NSLOW   (sizeof(dispSlow)  / sizeof(dispSlow[0]))
+
+static MCAN_TxBufElement dispMsg;
+static N16 dispIdx = 0;         // 0..NFAST+NFLAGS-1 fast, NFAST+NFLAGS = slow slot
+static N16 dispSlowIdx = 0;
+static N16 dispLastMs = 0;
+
+static void DispPutFloat(N16 pos, float *v)
+{
+    uint32_t u = *(uint32_t *) v;
+    dispMsg.data[pos + 0] = (u >> 0)  & 0xff;
+    dispMsg.data[pos + 1] = (u >> 8)  & 0xff;
+    dispMsg.data[pos + 2] = (u >> 16) & 0xff;
+    dispMsg.data[pos + 3] = (u >> 24) & 0xff;
+}
+
+static void DispPutWord(N16 pos, int *v)
+{
+    dispMsg.data[pos + 0] = (*v >> 0) & 0xff;
+    dispMsg.data[pos + 1] = (*v >> 8) & 0xff;
+}
+
+void DisplayBroadcast(void)
+{
+    N16 ofs;
+    N16 unit = (address == 2) ? 1 : 0;
+
+    if((N16)(milliseconds - dispLastMs) < DISP_FRAME_MS) return;
+    if(MCAN_getTxBufReqPend(MCANA_DRIVER_BASE) & (1UL << DISP_TXBUF)) return;   // previous frame still queued
+    dispLastMs = milliseconds;
+
+    if(dispIdx < DISP_NFAST)
+    {
+        ofs = dispFast[dispIdx].ofs;
+        DispPutFloat(0, dispFast[dispIdx].a);
+        DispPutFloat(4, dispFast[dispIdx].b);
+    }
+    else if(dispIdx < (DISP_NFAST + DISP_NFLAGS))
+    {
+        const DISP_INT *f = &dispFlags[dispIdx - DISP_NFAST];
+        ofs = f->ofs;
+        DispPutWord(0, f->w0);
+        DispPutWord(2, f->w1);
+        DispPutWord(4, f->w2);
+        DispPutWord(6, f->w3);
+    }
+    else
+    {
+        ofs = dispSlow[dispSlowIdx].ofs;
+        DispPutFloat(0, dispSlow[dispSlowIdx].a);
+        DispPutFloat(4, dispSlow[dispSlowIdx].b);
+        if(++dispSlowIdx >= DISP_NSLOW) dispSlowIdx = 0;
+    }
+
+    if(++dispIdx > (DISP_NFAST + DISP_NFLAGS)) dispIdx = 0;
+
+    dispMsg.id  = (uint32_t)(DISP_BASE_ID + unit * DISP_UNIT_STEP + ofs) << 18;
+    dispMsg.rtr = 0U; dispMsg.xtd = 0U; dispMsg.esi = 0U;
+    dispMsg.dlc = 8U; dispMsg.brs = 0U; dispMsg.fdf = 0U;
+    dispMsg.efc = 0U; dispMsg.mm  = 0U;
+
+    MCAN_writeMsgRam(MCANA_DRIVER_BASE, MCAN_MEM_TYPE_BUF, DISP_TXBUF, &dispMsg);
+    MCAN_txBufAddReq(MCANA_DRIVER_BASE, DISP_TXBUF);
+}
 long val1 = 0, val2 = 0;
 __interrupt void MCANIntr1ISR(void)
 {
