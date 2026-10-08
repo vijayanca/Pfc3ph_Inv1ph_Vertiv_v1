@@ -795,10 +795,9 @@ void update_rmsmeters(void)
 
        if(ManualBalancing)
        {
-           // Bridge2AngleAdjust (deg) acts as a lag count, same direction rule
-           // as the auto path below; SP1+SP2 stays 60 deg
+           // Bridge2AngleAdjust (deg, bipolar): +ve delays bridge 2,
+           // -ve advances it; SP1+SP2 stays 60 deg
            manualBalCount = (int) (Bridge2AngleAdjust * count_30 / 30.0);
-           if(!BalancingDirection) manualBalCount = -manualBalCount;
            count30_SP1 = count_30 + manualBalCount;
            count30_SP2 = count_30 - manualBalCount;
        }
