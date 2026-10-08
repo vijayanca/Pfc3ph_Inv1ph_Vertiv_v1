@@ -179,6 +179,7 @@ typedef signed char S8;
 #define RESET_ALL() \
         SystemFlag.all = 0; \
         LimitFlag.all = 0;  \
+        faultFlag = 0;      \
         DigitalInputFlag1 &= cfgAutoResetFlag;  \
         chkFrequency.maxTimer = 0; \
         chkVr.maxTimer = 0; \

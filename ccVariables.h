@@ -196,6 +196,7 @@ CCEXTERN    volatile Uint16 interchar_silent_timer INIT0;
 CCEXTERN    volatile Uint16 char_waiting INIT0;
 CCEXTERN    volatile Uint16 chars_rxd INIT0;
 CCEXTERN    volatile Uint16 address INIT0;
+CCEXTERN    volatile N16 fastOCTrip INIT0;     // set by the 1 kHz DC overload check, cleared by updateStatus()
 CCEXTERN    volatile Uint16 vptr INIT0;
 CCEXTERN	unsigned char *rxbuffer;
 CCEXTERN    unsigned char *rxbuffer1;

@@ -544,8 +544,9 @@ volatile N16 TimerRunning = 0;
      UpdateBits();
    //  UpdateRelayBits();
 
-     if (TripBitsFlag || (DigitalInputFlag1 & cfgTripFlag))
+     if (TripBitsFlag || (DigitalInputFlag1 & cfgTripFlag) || fastOCTrip)
          {
+             fastOCTrip = FALSE;     // handled here; cause stays in faultFlag
              if(!SystemFlag.bit.TRIPFAULT)
                  {
                      if(TripCount<MaxRestartCount) TripCount++;
