@@ -33,8 +33,8 @@ const PARAM_INT defaultValuesInt[] = {
                                       {20,1000,20}, /* BalancingRate 210 */
                                       {1,12,3}, /* AverageCount 211: DC average = 1/3 cycle */
                                       {0,200,0}, /* irOffset 212 */
-                                      {0,200,0}, /* iyOffset 213 */
-                                      {0,200,0}, /* ibOffset 214 */
+                                      {0,3600,0}, /* Idc1Offset 213: ADC counts at 0 A */
+                                      {0,3600,0}, /* Idc2Offset 214: ADC counts at 0 A */
                                       {0,32767,0}, /* MsgMask1 215 */
                                       {0,32767,0}, /* MsgMask2 216 */
                                       {0,32767,0}, /* MsgMask3 217 */

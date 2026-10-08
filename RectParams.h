@@ -435,8 +435,8 @@
 #define    BalancingRate           ArrayParamsI[210]  //,,1
 #define    AverageCount            ArrayParamsI[211]  //,,1
 #define    IdcHalfLimiting         ArrayParamsI[212]  //,,1
-#define    __notUsedW5             ArrayParamsI[213]  //,,1
-#define    __notUsedW6             ArrayParamsI[214]  //,,1
+#define    Idc1Offset              ArrayParamsI[213]  //,,1
+#define    Idc2Offset              ArrayParamsI[214]  //,,1
 
 #define    MsgMask1                ArrayParamsI[215]  //,,1
 #define    MsgMask2                ArrayParamsI[216]  //,,1

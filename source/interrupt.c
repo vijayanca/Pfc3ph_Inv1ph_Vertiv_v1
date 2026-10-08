@@ -228,9 +228,9 @@ interrupt void AdcISR(void) {
 
      lpf_vdc.u = (float)AnalogInput7 * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_vdc);
-     lpf_idc1.u = (float)AnalogInput8 * FLOAT_CONVERTER_DC;
+     lpf_idc1.u = (float)(AnalogInput8 - Idc1Offset) * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_idc1);
-     lpf_idc2.u = (float)AnalogInput9 * FLOAT_CONVERTER_DC;
+     lpf_idc2.u = (float)(AnalogInput9 - Idc2Offset) * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_idc2);
      lpf_ibat.u = (float)(AnalogInput11 - IbatOffset) * FLOAT_CONVERTER_DC;
      LOWPASSFILTER(lpf_ibat);
