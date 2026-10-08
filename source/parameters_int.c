@@ -30,7 +30,7 @@ const PARAM_INT defaultValuesInt[] = {
                                       {0,1000,0}, /* BiasOffset 207 */
                                       {0,1,0}, /* unitOncmd 208 */
                                       {10,1000,20}, /* CANFailDelay 209 */
-                                      {100,1000,200}, /* BalancingRate 210 */
+                                      {20,1000,20}, /* BalancingRate 210 */
                                       {0,200,0}, /* vbOffset 211 */
                                       {0,200,0}, /* irOffset 212 */
                                       {0,200,0}, /* iyOffset 213 */

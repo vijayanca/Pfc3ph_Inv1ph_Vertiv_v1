@@ -434,15 +434,20 @@ N16 ch = 0;
 
 void    ActiveBridgeBalancing(void)
 {
+        // Fast bridge currents (one-cycle moving average, idc1Fbk/idc2Fbk),
+        // not the 32-cycle averaged Idc1/Idc2 display values, so the loop
+        // can step every mains cycle (BalancingRate = 20 ms) without hunting
+        float i1 = idc1Fbk * Idc1SF;
+        float i2 = idc2Fbk * Idc2SF;
 
-        if((Idc1 + Idc2) > MinLoadCurrent)  //min 20A
+        if((i1 + i2) > MinLoadCurrent)  //min 20A
         {
-            if(Idc1 > (Idc2 + MinUnbalanceCurrent))
+            if(i1 > (i2 + MinUnbalanceCurrent))
                 {
                     if(Bridge2LagCount_1) Bridge2LagCount_1--;
                     else if(Bridge2LeadCount_1 < MaxBalanceCount) Bridge2LeadCount_1++;
                 }
-            else if(Idc2 > (Idc1 + MinUnbalanceCurrent))
+            else if(i2 > (i1 + MinUnbalanceCurrent))
                 {
                         if(Bridge2LeadCount_1) Bridge2LeadCount_1--;
                         else if(Bridge2LagCount_1 < MaxBalanceCount) Bridge2LagCount_1++;
