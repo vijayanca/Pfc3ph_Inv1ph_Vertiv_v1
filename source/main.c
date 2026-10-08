@@ -769,6 +769,7 @@ void update_rmsmeters(void)
 {
             float32_t   rawval1 = 0;
             int count_60_1 = 0;
+            int manualBalCount = 0;
 
             count_60_1 = (int) (periodCount/(6*120));
             count_60_Sum += count_60_1;
@@ -794,8 +795,12 @@ void update_rmsmeters(void)
 
        if(ManualBalancing)
        {
-           count30_SP1 = count_30 + (int) (Bridge2AngleAdjust * 69.40);
-           count30_SP2 = count_30 + (int) (Bridge2AngleAdjust * 69.40);
+           // Bridge2AngleAdjust (deg) acts as a lag count, same direction rule
+           // as the auto path below; SP1+SP2 stays 60 deg
+           manualBalCount = (int) (Bridge2AngleAdjust * count_30 / 30.0);
+           if(!BalancingDirection) manualBalCount = -manualBalCount;
+           count30_SP1 = count_30 + manualBalCount;
+           count30_SP2 = count_30 - manualBalCount;
        }
        else
        {

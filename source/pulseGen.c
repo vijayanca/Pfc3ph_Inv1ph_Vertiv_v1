@@ -13,11 +13,8 @@
 #include "inc/hw_memmap.h"
 #include "sci.h"
 
-#ifdef DEVICE_SYSCLK_FREQ
-#define ECAP_TICKS_PER_US   ((N32)(DEVICE_SYSCLK_FREQ / 1000000UL))
-#else
-#define ECAP_TICKS_PER_US   ((N32)120)
-#endif
+// eCAP1 timebase = SYSCLK; SYSTEM_FREQUENCY (MHz) from rectDefines.h
+#define ECAP_TICKS_PER_US   ((N32)SYSTEM_FREQUENCY)
 volatile N32 prevR_Count = 0;
 volatile N32 prevY_Count = 0;
 volatile N32 prevB_Count = 0;
@@ -237,19 +234,6 @@ else
     prevY_Count = capcount_now;
     CpuTimer1Regs.TCR.bit.TIF = 1;
     // Timer1 is a CPU-level interrupt (INT13), not routed through the PIE,
-}
-void UpdatePulseTiming(uint32_t periodTicks)
-{
-    uint32_t t30;
-    if((periodTicks < (15000UL * (uint32_t)ECAP_TICKS_PER_US)) ||
-       (periodTicks > (25000UL * (uint32_t)ECAP_TICKS_PER_US)))
-        return;
-    t30 = (periodTicks + (6UL * (uint32_t)ECAP_TICKS_PER_US)) /
-          (12UL * (uint32_t)ECAP_TICKS_PER_US);
-    count30_SP1 = t30;
-    count30_SP2 = t30;
-    count_60    = t30 << 1;
-    count_30    = t30;
 }
 
 

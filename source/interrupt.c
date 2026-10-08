@@ -143,8 +143,8 @@ interrupt void AdcISR(void) {
      pll_omega = phaseLockedLoopB(&pllGrid);
 
 //--------------------------------------------------------------------------
-          if( (lpf_vInpR.y>= 0.0) && (prev_valueR< 0.0) )
-          //if( (pllGrid.theta.sin_val>= 0.0) && (prev_valueR< 0.0) )
+          //if( (lpf_vInpR.y>= 0.0) && (prev_valueR< 0.0) )
+          if( (pllGrid.theta.sin_val>= 0.0) && (prev_valueR< 0.0) )
                  {
                     STOP_TIMER0;
                     LOAD_TIMER0(AlphaCount);
@@ -182,8 +182,8 @@ interrupt void AdcISR(void) {
                             }
                         }
                  }
-//            prev_valueR = pllGrid.theta.sin_val;
-            prev_valueR = lpf_vInpR.y;
+            prev_valueR = pllGrid.theta.sin_val;
+//            prev_valueR = lpf_vInpR.y;
 
             if( (pllGrid.theta.sin_val<= 0.0) && (prev_valueY> 0.0) )
                  {

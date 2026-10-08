@@ -443,7 +443,7 @@ void InitEPwm12Gpio(void)
     // Comment out other unwanted lines.
     //
     GpioCtrlRegs.GPHPUD.bit.GPIO253 = 1; // Disable pull-up on GPIO167 (EPWM12A)
-    GpioCtrlRegs.GPHPUD.bit.GPIO247 = 1; // Disable pull-up on GPIO168 (EPWM12B)
+    // GPIO247 (EPWM12B) not configured: it is DI_1 on the Common Controller v2
 //    GpioCtrlRegs.GPAPUD.bit.GPIO22 = 1;  // Disable pull-up on GPIO22 (EPWM12A)
 //    GpioCtrlRegs.GPAPUD.bit.GPIO23 = 1;  // Disable pull-up on GPIO23 (EPWM12B)
 
@@ -453,7 +453,6 @@ void InitEPwm12Gpio(void)
     // Comment out other unwanted lines.
     //
     GpioCtrlRegs.GPHMUX1.bit.GPIO236 = 1; // Configure GPIO167 as EPWM12A
-    GpioCtrlRegs.GPHMUX2.bit.GPIO247 = 1; // Configure GPIO168 as EPWM12B
 
 //    //
 //    // Alternate mapping for EPWM-12. Uncomment if required. Write 0 to
