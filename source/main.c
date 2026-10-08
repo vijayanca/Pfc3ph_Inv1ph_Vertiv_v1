@@ -115,8 +115,8 @@ float ibatref_old = 0;
 
 	PieVectTable.SCIA_RX_INT = &SCIARx_ISR;
 	PieVectTable.SCIB_RX_INT = &SCIBRx_ISR;
-	PieVectTable.MCANA_0_INT = &MCANIntr1ISR;
-	PieVectTable.MCANA_1_INT = &MCANIntr1ISR;
+	PieVectTable.MCANB_0_INT = &MCANIntr1ISR;   // paralleling RX on CAN-B
+	PieVectTable.MCANB_1_INT = &MCANIntr1ISR;
 
     AdcaRegs.ADCINTSEL1N2.bit.INT1E = 1;
     AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 6;
@@ -133,7 +133,7 @@ float ibatref_old = 0;
 	PieCtrlRegs.PIEIER1.bit.INTx1 = 1; // Enable INT 1.1 ADCA
     PieCtrlRegs.PIEIER9.bit.INTx1 = 1; // PIE group 9 - for SCIA RX
     PieCtrlRegs.PIEIER9.bit.INTx3 = 1; // PIE group 9 - for SCIB RX
-    PieCtrlRegs.PIEIER9.bit.INTx8 = 1;   // MCANA_1 (9.8): MCAN A RX, line 1
+    PieCtrlRegs.PIEIER9.bit.INTx10 = 1;  // MCANB_1 (9.10): CAN-B paralleling RX, line 1
 
 	PieCtrlRegs.PIEIER1.bit.INTx7 = 1; // Timer0
 
@@ -210,10 +210,11 @@ float ibatref_old = 0;
     delay_ms(1050);     // no RTC (mcp79522.c excluded): keep the start-up timing
 #endif
 
-    InitMCAN();
-    MCAN_enableIntr(MCANA_DRIVER_BASE, MCAN_INTR_MASK_ALL, 1U);
-    MCAN_selectIntrLine(MCANA_DRIVER_BASE, MCAN_INTR_MASK_ALL, MCAN_INTR_LINE_NUM_1);
-    MCAN_enableIntrLine(MCANA_DRIVER_BASE, MCAN_INTR_LINE_NUM_1, 1U);
+    InitECAN();     // MCANA (GPIO30/31) and MCANB (GPIO18/19) pin mux
+    InitMCAN();     // CAN-A display broadcast, CAN-B paralleling
+    MCAN_enableIntr(MCANB_DRIVER_BASE, MCAN_INTR_MASK_ALL, 1U);
+    MCAN_selectIntrLine(MCANB_DRIVER_BASE, MCAN_INTR_MASK_ALL, MCAN_INTR_LINE_NUM_1);
+    MCAN_enableIntrLine(MCANB_DRIVER_BASE, MCAN_INTR_LINE_NUM_1, 1U);
     freqNotSet = TRUE;
  //   InitCapture();
     vdc_inc = 0.004;

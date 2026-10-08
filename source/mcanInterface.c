@@ -51,6 +51,13 @@
 
 __interrupt void MCANIntr1ISR(void);
 void DisplayBroadcast(void);
+static void InitMCANModule(uint32_t base, const MCAN_InitParams *initParams,
+                           const MCAN_BitTimingParams *bitTimes,
+                           const MCAN_MsgRAMConfigParams *ramCfg,
+                           const MCAN_StdMsgIDFilterElement *filt);
+
+// Paralleling with the other unit runs on CAN-B
+#define PAR_CAN_BASE    MCANB_DRIVER_BASE
 
 
 unsigned int num = 0;
@@ -65,8 +72,8 @@ N16 pktNumber = 0;
 void    MCAN_Transmit(unsigned int Id, unsigned int bufID)
 {
         txMsg[0].id       = (uint32_t)Id << 18;
-        MCAN_writeMsgRam(MCANA_DRIVER_BASE, MCAN_MEM_TYPE_BUF, bufID,&txMsg[bufID]);
-        MCAN_txBufAddReq(MCANA_DRIVER_BASE, 0U);
+        MCAN_writeMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_BUF, bufID,&txMsg[bufID]);
+        MCAN_txBufAddReq(PAR_CAN_BASE, 0U);
 }
 N16 canID = 0;
 void    MCANBusProcessing(void)
@@ -239,20 +246,21 @@ __interrupt void MCANIntr1ISR(void)
     float *fptr;
  //   N16 n1 = 0;
 
-    intrStatus = MCAN_getIntrStatus(MCANA_DRIVER_BASE);
-    HW_WR_FIELD32(MCANA_DRIVER_BASE + MCAN_MCANSS_EOI, MCAN_MCANSS_EOI, 0x2U);
-    MCAN_clearIntrStatus(MCANA_DRIVER_BASE, intrStatus);
+    // Paralleling RX: CAN-B, interrupt line 1 (PIE 9.10 MCANB_1)
+    intrStatus = MCAN_getIntrStatus(PAR_CAN_BASE);
+    HW_WR_FIELD32(PAR_CAN_BASE + MCAN_MCANSS_EOI, MCAN_MCANSS_EOI, 0x2U);
+    MCAN_clearIntrStatus(PAR_CAN_BASE, intrStatus);
 
     if((MCAN_INTR_SRC_RX_FIFO1_NEW_MSG & intrStatus) == MCAN_INTR_SRC_RX_FIFO1_NEW_MSG)
     {
-        MCAN_readMsgRam(MCANA_DRIVER_BASE, MCAN_MEM_TYPE_FIFO, 0U,
+        MCAN_readMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_FIFO, 0U,
                             MCAN_RX_FIFO_NUM_1, &rxMsg1);
 
         rxMsg[loopCnt] = rxMsg1;
         RxFS.num = MCAN_RX_FIFO_NUM_1;
         CanID = rxMsg1.id >> 18;
 
-        MCAN_writeRxFIFOAck(MCANA_DRIVER_BASE, MCAN_RX_FIFO_NUM_1,
+        MCAN_writeRxFIFOAck(PAR_CAN_BASE, MCAN_RX_FIFO_NUM_1,
                             RxFS.getIdx);
 
         if(CanID == PidAddr1) //from Other Unit
@@ -371,28 +379,41 @@ void    InitMCAN(void)
     bitTimes.dataTimeSeg2       = 3U;
     bitTimes.dataSynchJumpWidth = 3U;
     //
-    while(FALSE == MCAN_isMemInitDone(MCANA_DRIVER_BASE))
+    // Same set-up on both modules: CAN-A = display broadcast,
+    // CAN-B = paralleling (RX interrupt on line 1, enabled in main.c)
+    InitMCANModule(MCANA_DRIVER_BASE, &initParams, &bitTimes, &msgRAMConfigParams, &stdFiltelem);
+    InitMCANModule(MCANB_DRIVER_BASE, &initParams, &bitTimes, &msgRAMConfigParams, &stdFiltelem);
+}
+
+static void InitMCANModule(uint32_t base, const MCAN_InitParams *initParams,
+                           const MCAN_BitTimingParams *bitTimes,
+                           const MCAN_MsgRAMConfigParams *ramCfg,
+                           const MCAN_StdMsgIDFilterElement *filt)
+{
+    int i;
+
+    while(FALSE == MCAN_isMemInitDone(base))
     {
     }
-    MCAN_setOpMode(MCANA_DRIVER_BASE, MCAN_OPERATION_MODE_SW_INIT);
-    while (MCAN_OPERATION_MODE_SW_INIT != MCAN_getOpMode(MCANA_DRIVER_BASE))
+    MCAN_setOpMode(base, MCAN_OPERATION_MODE_SW_INIT);
+    while (MCAN_OPERATION_MODE_SW_INIT != MCAN_getOpMode(base))
     {}
 
-    MCAN_init(MCANA_DRIVER_BASE, &initParams);
-    MCAN_setBitTime(MCANA_DRIVER_BASE, &bitTimes);
-    MCAN_msgRAMConfig(MCANA_DRIVER_BASE, &msgRAMConfigParams);
-    MCAN_addStdMsgIDFilter(MCANA_DRIVER_BASE, 0U, &stdFiltelem);
+    MCAN_init(base, initParams);
+    MCAN_setBitTime(base, bitTimes);
+    MCAN_msgRAMConfig(base, ramCfg);
+    MCAN_addStdMsgIDFilter(base, 0U, filt);
 
     // A pending clock-stop request (CCCR.CSR) keeps the node in INIT;
     // clear it before going to normal mode
-    MCAN_addClockStopRequest(MCANA_DRIVER_BASE, FALSE);
-    MCAN_setOpMode(MCANA_DRIVER_BASE, MCAN_OPERATION_MODE_NORMAL);
+    MCAN_addClockStopRequest(base, FALSE);
+    MCAN_setOpMode(base, MCAN_OPERATION_MODE_NORMAL);
 
     // Wait for the node to leave INIT (bounded: 11 recessive bits at 250k
     // is ~44 us, allow ~1 ms) so a dead bus cannot hang the main loop
     for(i = 0; i < 1000; i++)
     {
-        if(MCAN_OPERATION_MODE_NORMAL == MCAN_getOpMode(MCANA_DRIVER_BASE)) break;
+        if(MCAN_OPERATION_MODE_NORMAL == MCAN_getOpMode(base)) break;
         DELAY_US(1);
     }
 }
