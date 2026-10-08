@@ -396,8 +396,7 @@ void SetFactoryDefaults(void) {
  */
 N16 UpdateOne(N16 adr1, float32_t val)
 {
-    N16 adr = 0;
-     adr = st_addr/2;
+    N16 adr = adr1;     // float index from the caller (SCIA, SCIB or CAN)
 
     if ((adr >= WR_START) && (adr < (WR_START + NUMWPARAMS))) {
         paramptr = &defaultValues[adr - WR_START];
