@@ -201,9 +201,9 @@ void    InitMCAN(void)
     txMsg[loopCnt].rtr      = 0U;   // RTR = 0 (Data frame)
     txMsg[loopCnt].xtd      = 0U;   // XTD = 0 (11-bit standard identifier)
     txMsg[loopCnt].esi      = 0U;
-    txMsg[loopCnt].dlc      = 8U;  // 64 bytes
-    txMsg[loopCnt].brs      = 1U;   // Bit-rate switching enabled
-    txMsg[loopCnt].fdf      = 1U;   // Frame transmitted in CAN FD format
+    txMsg[loopCnt].dlc      = 8U;   // 8 bytes
+    txMsg[loopCnt].brs      = 0U;   // classic CAN: no bit-rate switching
+    txMsg[loopCnt].fdf      = 0U;   // classic CAN frame (FD mode is off)
     txMsg[loopCnt].efc      = 1U;   // Store TX events
     txMsg[loopCnt].mm       = 0xAAU;
 
@@ -219,6 +219,7 @@ void    InitMCAN(void)
 
     initParams.fdMode            = 0x0U; // FD operation enabled.
     initParams.brsEnable         = 0x0U; // Bit rate switching enabled.
+    initParams.emulationEnable   = 0x1U; // MCANSS_CTRL.EMUEN: keep running on debug halt
     //
     msgRAMConfigParams.flssa                = MCAN_STD_ID_FILT_START_ADDR;
     msgRAMConfigParams.lss                  = MCAN_STD_ID_FILTER_NUM;
@@ -238,16 +239,18 @@ void    InitMCAN(void)
     stdFiltelem.sfid1              = 0x3FFU; // Standard ID Filter
     stdFiltelem.sfec               = 0x6U; // Store into FIFO 1.
     stdFiltelem.sft                = 0x2U; // SFID1 = filter; SFID2 = mask
-    // Initialize BaudRate
-    //
-    bitTimes.nomRatePrescalar   = 0x7U; // Nominal Baud Rate Pre-scaler.
-    bitTimes.nomTimeSeg1        = 0x9U; // Nominal Time segment before SP
-    bitTimes.nomTimeSeg2        = 0x8U; // Nominal Time segment after SP.
-    bitTimes.nomSynchJumpWidth  = 0x8U; // Nominal SJW
-    bitTimes.dataRatePrescalar  = 0x1U; // Data Baud Rate Pre-scaler.
-    bitTimes.dataTimeSeg1       = 0x9U; // Data Time segment before SP
-    bitTimes.dataTimeSeg2       = 0x8U; // Data Time segment after SP
-    bitTimes.dataSynchJumpWidth = 0x8U; // Data SJW
+    // Bit rate 250 kbit/s, classic CAN.
+    // MCAN clock = SYSCLK 150 MHz / 3 (SysCtl_setMCANClk DIV_3) = 50 MHz
+    // 50 MHz / 10 = 5 MHz tq; bit = 1 + 15 + 4 = 20 tq -> 250 kbit/s, SP 80 %
+    // (register fields are value - 1)
+    bitTimes.nomRatePrescalar   = 9U;   // /10
+    bitTimes.nomTimeSeg1        = 14U;  // 15 tq (prop + phase1)
+    bitTimes.nomTimeSeg2        = 3U;   // 4 tq
+    bitTimes.nomSynchJumpWidth  = 3U;   // 4 tq
+    bitTimes.dataRatePrescalar  = 9U;   // data phase unused (FD off)
+    bitTimes.dataTimeSeg1       = 14U;
+    bitTimes.dataTimeSeg2       = 3U;
+    bitTimes.dataSynchJumpWidth = 3U;
     //
     while(FALSE == MCAN_isMemInitDone(MCANA_DRIVER_BASE))
     {
@@ -260,11 +263,18 @@ void    InitMCAN(void)
     MCAN_setBitTime(MCANA_DRIVER_BASE, &bitTimes);
     MCAN_msgRAMConfig(MCANA_DRIVER_BASE, &msgRAMConfigParams);
     MCAN_addStdMsgIDFilter(MCANA_DRIVER_BASE, 0U, &stdFiltelem);
+
+    // A pending clock-stop request (CCCR.CSR) keeps the node in INIT;
+    // clear it before going to normal mode
+    MCAN_addClockStopRequest(MCANA_DRIVER_BASE, FALSE);
     MCAN_setOpMode(MCANA_DRIVER_BASE, MCAN_OPERATION_MODE_NORMAL);
 
-//    while (MCAN_OPERATION_MODE_NORMAL != MCAN_getOpMode(MCANA_DRIVER_BASE))
+    // Wait for the node to leave INIT (bounded: 11 recessive bits at 250k
+    // is ~44 us, allow ~1 ms) so a dead bus cannot hang the main loop
+    for(i = 0; i < 1000; i++)
     {
-
+        if(MCAN_OPERATION_MODE_NORMAL == MCAN_getOpMode(MCANA_DRIVER_BASE)) break;
+        DELAY_US(1);
     }
 }
 

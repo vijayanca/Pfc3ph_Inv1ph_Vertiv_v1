@@ -133,7 +133,7 @@ float ibatref_old = 0;
 	PieCtrlRegs.PIEIER1.bit.INTx1 = 1; // Enable INT 1.1 ADCA
     PieCtrlRegs.PIEIER9.bit.INTx1 = 1; // PIE group 9 - for SCIA RX
     PieCtrlRegs.PIEIER9.bit.INTx3 = 1; // PIE group 9 - for SCIB RX
-    PieCtrlRegs.PIEIER9.bit.INTx10 = 1;  //MCAN A RX
+    PieCtrlRegs.PIEIER9.bit.INTx8 = 1;   // MCANA_1 (9.8): MCAN A RX, line 1
 
 	PieCtrlRegs.PIEIER1.bit.INTx7 = 1; // Timer0
 
