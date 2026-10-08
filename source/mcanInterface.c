@@ -50,7 +50,11 @@
 #define MCAN_TX_EVENT_START_ADDR        (MCAN_TX_BUFF_START_ADDR + (MCAN_getMsgObjSize(MCAN_TX_BUFF_ELEM_SIZE) * 4U * (MCAN_TX_BUFF_SIZE + MCAN_TX_FQ_SIZE)))
 
 __interrupt void MCANIntr1ISR(void);
+__interrupt void MCANARxISR(void);
 void DisplayBroadcast(void);
+void DisplayWriteProcessing(void);
+N16  DisplayUnit(void);
+N16  DisplaySetId(void);
 static void InitMCANModule(uint32_t base, const MCAN_InitParams *initParams,
                            const MCAN_BitTimingParams *bitTimes,
                            const MCAN_MsgRAMConfigParams *ramCfg,
@@ -121,122 +125,164 @@ void    MCANBusProcessing(void)
           }
 
        DisplayBroadcast();
+       DisplayWriteProcessing();
       }
 
 /*------------------------------------------------------------------------------
- Display broadcast on CAN-A
- Classic CAN, 11-bit ID, DLC 8, little-endian. The display decodes by ID.
- ID = DISP_BASE_ID + (unit - 1) * DISP_UNIT_STEP + offset
-     unit 1: 0x100..0x13F, unit 2: 0x140..0x17F
- Float frames : bytes 0-3 = value A (float32), bytes 4-7 = value B (float32)
- Flag frames  : four uint16 words, bytes 0-1, 2-3, 4-5, 6-7
- One frame every DISP_FRAME_MS on TX buffer 1. The fast table runs
- continuously; one slow (settings) frame is added after each fast round.
+ Display unit on CAN-A
+ Classic CAN, 11-bit ID, DLC 8, int16 words little-endian (low byte first).
+
+ Broadcast (rectifier -> display), ID = DISP_BASE_ID + (unit - 1) * DISP_UNIT_STEP + n
+   unit 1: 0x200..0x2DB, unit 2: 0x300..0x3DB
+   n = 0x00..0x77 : floats, bytes 0-3 = ArrayParamsF[2n], bytes 4-7 = ArrayParamsF[2n+1]
+                    (float32), ArrayParamsF[0..239]
+   n = 0x78..0xDB : ints, m = n - 0x78, words 0..3 = ArrayParamsI[4m .. 4m+3]
+                    (int16), ArrayParamsI[0..399]
+   One frame every DISP_FRAME_MS on TX buffer 1 -> 220 frames, all values
+   every 440 ms.
+
+ Write (display -> rectifier), same format as the inverter/PFC display protocol
+   float: ID = DISP_SET_F_ID + 2*(unit-1)  (unit 1: 0x100, unit 2: 0x102)
+          bytes 0-1 = ArrayParamsF index, bytes 4-7 = float32 -> UpdateOne(idx)
+   int  : ID = DISP_SET_I_ID + 2*(unit-1)  (unit 1: 0x101, unit 2: 0x103)
+          bytes 0-1 = ArrayParamsI index, bytes 4-5 = int16   -> UpdateOneInt(idx)
+   UpdateOne/UpdateOneInt range-check the index, as for Modbus. The frame is
+   captured in the RX ISR and applied in the main loop, since a commit
+   (int index 228 = 1) writes the EEPROM.
 ------------------------------------------------------------------------------*/
-#define DISP_BASE_ID        0x100U
-#define DISP_UNIT_STEP      0x40U
+#define DISP_BASE_ID        0x200U
+#define DISP_UNIT_STEP      0x100U
+#define DISP_NFLOAT         240U                    // ArrayParamsF[0..239]
+#define DISP_NINT           400U                    // ArrayParamsI[0..399]
+#define DISP_FLT_FRAMES     (DISP_NFLOAT / 2U)      // 120 frames, n = 0x00..0x77
+#define DISP_INT_FRAMES     (DISP_NINT / 4U)        // 100 frames, n = 0x78..0xDB
+#define DISP_NFRAMES        (DISP_FLT_FRAMES + DISP_INT_FRAMES)
 #define DISP_TXBUF          1U
-#define DISP_FRAME_MS       5U
-
-typedef struct { N16 ofs; float *a; float *b; } DISP_FLT;
-typedef struct { N16 ofs; int *w0; int *w1; int *w2; int *w3; } DISP_INT;
-
-// Fast group: measurements (offset 0x00..0x0A)
-static const DISP_FLT dispFast[] = {
-    {0x00, &VinpRY,      &VinpYB},
-    {0x01, &VinpBR,      &MainsFrequency},
-    {0x02, &IinpR,       &IinpY},
-    {0x03, &IinpB,       &Vdc},
-    {0x04, &Idc1,        &Idc2},
-    {0x05, &Vbat,        &Ibat},
-    {0x06, &LoadVoltage, &LoadCurrent},
-    {0x07, &IdcTotal,    &VdcRipple},
-    {0x08, &BattTemp,    &Temp2},
-    {0x09, &Temp3,       &kW_Total},
-    {0x0A, &kVA_Total,   &DC_kW},
-};
-
-// Fast group: status / alarm words (offset 0x0B..0x0C)
-static const DISP_INT dispFlags[] = {
-    {0x0B, &AlarmFlag1, &AlarmFlag2, &AlarmFlag3, &AlarmFlag4},
-    {0x0C, &AlarmFlag5, &AlarmFlag6, &AlarmFlag7, &opMode},
-};
-
-// Slow group: settings (offset 0x10..0x15)
-static const DISP_FLT dispSlow[] = {
-    {0x10, &VdcRef,          &IbatRef},
-    {0x11, &FloatVRef,       &BoostVRef},
-    {0x12, &EqualiseVRef,    &DGModeVRef},
-    {0x13, &FloatIbatRef,    &BoostIbatRef},
-    {0x14, &EqualiseIbatRef, &IdcRef},
-    {0x15, &VacHL,           &VacLL},
-};
-
-#define DISP_NFAST   (sizeof(dispFast)  / sizeof(dispFast[0]))
-#define DISP_NFLAGS  (sizeof(dispFlags) / sizeof(dispFlags[0]))
-#define DISP_NSLOW   (sizeof(dispSlow)  / sizeof(dispSlow[0]))
+#define DISP_FRAME_MS       2U
+#define DISP_SET_F_ID       0x100U
+#define DISP_SET_I_ID       0x101U
 
 static MCAN_TxBufElement dispMsg;
-static N16 dispIdx = 0;         // 0..NFAST+NFLAGS-1 fast, NFAST+NFLAGS = slow slot
-static N16 dispSlowIdx = 0;
+static N16 dispIdx = 0;
 static N16 dispLastMs = 0;
 
-static void DispPutFloat(N16 pos, float *v)
+static volatile N16 dispWrPending = 0;
+static N16 dispWrId = 0;
+static N16 dispWrData[8];
+
+N16 DisplayUnit(void)
 {
-    uint32_t u = *(uint32_t *) v;
-    dispMsg.data[pos + 0] = (u >> 0)  & 0xff;
-    dispMsg.data[pos + 1] = (u >> 8)  & 0xff;
-    dispMsg.data[pos + 2] = (u >> 16) & 0xff;
-    dispMsg.data[pos + 3] = (u >> 24) & 0xff;
+    return (address == 2) ? 2 : 1;
 }
 
-static void DispPutWord(N16 pos, int *v)
+// Float-write ID for this unit; the int-write ID is this + 1
+N16 DisplaySetId(void)
 {
-    dispMsg.data[pos + 0] = (*v >> 0) & 0xff;
-    dispMsg.data[pos + 1] = (*v >> 8) & 0xff;
+    return DISP_SET_F_ID + ((DisplayUnit() - 1) << 1);
 }
 
 void DisplayBroadcast(void)
 {
-    N16 ofs;
-    N16 unit = (address == 2) ? 1 : 0;
+    N16 k;
+    int w;
+    uint32_t u;
 
     if((N16)(milliseconds - dispLastMs) < DISP_FRAME_MS) return;
     if(MCAN_getTxBufReqPend(MCANA_DRIVER_BASE) & (1UL << DISP_TXBUF)) return;   // previous frame still queued
     dispLastMs = milliseconds;
 
-    if(dispIdx < DISP_NFAST)
+    if(dispIdx < DISP_FLT_FRAMES)
     {
-        ofs = dispFast[dispIdx].ofs;
-        DispPutFloat(0, dispFast[dispIdx].a);
-        DispPutFloat(4, dispFast[dispIdx].b);
-    }
-    else if(dispIdx < (DISP_NFAST + DISP_NFLAGS))
-    {
-        const DISP_INT *f = &dispFlags[dispIdx - DISP_NFAST];
-        ofs = f->ofs;
-        DispPutWord(0, f->w0);
-        DispPutWord(2, f->w1);
-        DispPutWord(4, f->w2);
-        DispPutWord(6, f->w3);
+        for(k = 0; k < 2; k++)          // two float32
+        {
+            u = *(uint32_t *) &ArrayParamsF[(dispIdx << 1) + k];
+            dispMsg.data[(k << 2) + 0] = (u >> 0)  & 0xff;
+            dispMsg.data[(k << 2) + 1] = (u >> 8)  & 0xff;
+            dispMsg.data[(k << 2) + 2] = (u >> 16) & 0xff;
+            dispMsg.data[(k << 2) + 3] = (u >> 24) & 0xff;
+        }
     }
     else
     {
-        ofs = dispSlow[dispSlowIdx].ofs;
-        DispPutFloat(0, dispSlow[dispSlowIdx].a);
-        DispPutFloat(4, dispSlow[dispSlowIdx].b);
-        if(++dispSlowIdx >= DISP_NSLOW) dispSlowIdx = 0;
+        for(k = 0; k < 4; k++)          // four int16
+        {
+            w = ArrayParamsI[((dispIdx - DISP_FLT_FRAMES) << 2) + k];
+            dispMsg.data[(k << 1) + 0] = w & 0xff;
+            dispMsg.data[(k << 1) + 1] = (w >> 8) & 0xff;
+        }
     }
 
-    if(++dispIdx > (DISP_NFAST + DISP_NFLAGS)) dispIdx = 0;
-
-    dispMsg.id  = (uint32_t)(DISP_BASE_ID + unit * DISP_UNIT_STEP + ofs) << 18;
+    dispMsg.id  = (uint32_t)(DISP_BASE_ID + (DisplayUnit() - 1) * DISP_UNIT_STEP + dispIdx) << 18;
     dispMsg.rtr = 0U; dispMsg.xtd = 0U; dispMsg.esi = 0U;
     dispMsg.dlc = 8U; dispMsg.brs = 0U; dispMsg.fdf = 0U;
     dispMsg.efc = 0U; dispMsg.mm  = 0U;
 
     MCAN_writeMsgRam(MCANA_DRIVER_BASE, MCAN_MEM_TYPE_BUF, DISP_TXBUF, &dispMsg);
     MCAN_txBufAddReq(MCANA_DRIVER_BASE, DISP_TXBUF);
+
+    if(++dispIdx >= DISP_NFRAMES) dispIdx = 0;
+}
+
+// Display write: CAN-A RX, interrupt line 1 (PIE 9.8 MCANA_1)
+__interrupt void MCANARxISR(void)
+{
+    uint32_t intrStatus;
+    MCAN_RxBufElement rx;
+    MCAN_RxFIFOStatus fs;
+    N16 k;
+
+    intrStatus = MCAN_getIntrStatus(MCANA_DRIVER_BASE);
+    HW_WR_FIELD32(MCANA_DRIVER_BASE + MCAN_MCANSS_EOI, MCAN_MCANSS_EOI, 0x2U);
+    MCAN_clearIntrStatus(MCANA_DRIVER_BASE, intrStatus);
+
+    if(MCAN_INTR_SRC_RX_FIFO1_NEW_MSG & intrStatus)
+    {
+        fs.num = MCAN_RX_FIFO_NUM_1;
+        MCAN_getRxFIFOStatus(MCANA_DRIVER_BASE, &fs);
+        MCAN_readMsgRam(MCANA_DRIVER_BASE, MCAN_MEM_TYPE_FIFO, 0U, MCAN_RX_FIFO_NUM_1, &rx);
+        MCAN_writeRxFIFOAck(MCANA_DRIVER_BASE, MCAN_RX_FIFO_NUM_1, fs.getIdx);
+
+        // Only this unit's two write IDs pass the CAN-A filter; one write
+        // is held at a time until the main loop applies it
+        if(!dispWrPending)
+        {
+            dispWrId = (N16)(rx.id >> 18);
+            for(k = 0; k < 8; k++) dispWrData[k] = rx.data[k] & 0xff;
+            dispWrPending = 1;
+        }
+    }
+
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP9;
+}
+
+// Apply a display write in the main loop, same as the Modbus write path
+void DisplayWriteProcessing(void)
+{
+    N16 idx;
+    int ival;
+    uint32_t u;
+    float fval;
+
+    if(!dispWrPending) return;
+
+    idx = dispWrData[0] | (dispWrData[1] << 8);
+
+    if(dispWrId == DisplaySetId())                  // float write
+    {
+        u  = (uint32_t) dispWrData[4];
+        u |= (uint32_t) dispWrData[5] << 8;
+        u |= (uint32_t) dispWrData[6] << 16;
+        u |= (uint32_t) dispWrData[7] << 24;
+        fval = *(float *) &u;
+        UpdateOne(idx, fval);
+    }
+    else if(dispWrId == (DisplaySetId() + 1))       // int write
+    {
+        ival = (int) (dispWrData[4] | (dispWrData[5] << 8));
+        UpdateOneInt(idx, ival);
+    }
+
+    dispWrPending = 0;
 }
 long val1 = 0, val2 = 0;
 __interrupt void MCANIntr1ISR(void)
@@ -379,10 +425,14 @@ void    InitMCAN(void)
     bitTimes.dataTimeSeg2       = 3U;
     bitTimes.dataSynchJumpWidth = 3U;
     //
-    // Same set-up on both modules: CAN-A = display broadcast,
-    // CAN-B = paralleling (RX interrupt on line 1, enabled in main.c)
-    InitMCANModule(MCANA_DRIVER_BASE, &initParams, &bitTimes, &msgRAMConfigParams, &stdFiltelem);
+    // Same set-up on both modules (RX interrupts on line 1, enabled in main.c)
+    // CAN-B = paralleling: accept IDs 0x000..0x3FF
     InitMCANModule(MCANB_DRIVER_BASE, &initParams, &bitTimes, &msgRAMConfigParams, &stdFiltelem);
+
+    // CAN-A = display: accept only this unit's two write IDs (float, int)
+    stdFiltelem.sfid1 = DisplaySetId();
+    stdFiltelem.sfid2 = 0x7FEU;     // bit 0 don't care: ID and ID+1
+    InitMCANModule(MCANA_DRIVER_BASE, &initParams, &bitTimes, &msgRAMConfigParams, &stdFiltelem);
 }
 
 static void InitMCANModule(uint32_t base, const MCAN_InitParams *initParams,
