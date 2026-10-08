@@ -45,6 +45,11 @@ volatile N16 simIdc2Count = 1300;
 #define FLOAT_CONVERTER_DC    0.000244140625
 #define FLOAT_CONVERTER_AC    0.00048828125
 
+#define DC_AVG_MAX      150     // size of vdc_buf/idc1_buf/idc2_buf/ibat_buf (ccVariables.h)
+#define FAST_OC_MS      10      // DC overload above IdcHL this long (ms) -> trip
+
+N16 fastOCTimer = 0;
+
 float prevSin = 0;
 float prevSin1 = 0;
 N16 npoints = 0;
@@ -207,7 +212,10 @@ interrupt void AdcISR(void) {
                     if(adcSamples<MinPoints) adcSamples = FullCycle;
                     SamplesPerCycle = adcSamples;
                     adcSamples = 0;
-                    cycle3count = SamplesPerCycle/AverageCount;
+                    // DC feedback window = SamplesPerCycle / AverageCount
+                    // (3 -> 1/3 cycle: 2 x 300 Hz and 4 x 600 Hz ripple periods)
+                    if(AverageCount > 0) cycle3count = SamplesPerCycle/AverageCount;
+                    if(cycle3count > DC_AVG_MAX) cycle3count = DC_AVG_MAX;
 
                  }
             prev_valueY = pllGrid.theta.sin_val;
@@ -233,7 +241,7 @@ interrupt void AdcISR(void) {
      ibat_buf[vptr] = lpf_ibat.u;
      vptr++;
      if(vptr>=cycle3count) vptr = 0;
-     if(vptr>=220) vptr = 0;
+     if(vptr>=DC_AVG_MAX) vptr = 0;
 
 
      samplingCount_tmp++;
@@ -464,10 +472,10 @@ inline void ControlLoop(void)
  //   float _maxVref = 0;
 //------------------CLOSED LOOP CONTROL--------------------------
 
-    if(cycle3count<100)
+    if(cycle3count<100)     // no valid cycle yet: 1/3 cycle at ~20 kHz sampling
      {
          cycle3count =  133;
-         if(GridFrequency==60) cycle3count = 55;
+         if(GridFrequency==60) cycle3count = 111;
      }
 
     _vdcsum = 0; _idc1sum = 0;_ibatsum = 0;_idc2sum = 0;
@@ -490,6 +498,24 @@ inline void ControlLoop(void)
 
          if(CurrentSensingMode==0) idc2Fbk = 0;
          IdcFback = idc1Fbk +  idc2Fbk * sfFactor;
+
+    // Fast DC overload trip. Total DC current from the 1/3-cycle average
+    // (not the 640 ms display value): above IdcHL for FAST_OC_MS -> pulses
+    // off at once (TZ one-shot); updateStatus() then raises TRIPFAULT and the
+    // normal TripCount / auto-restart handling applies. Trip time ~10-17 ms.
+         if(pwmEnabled && ((idc1Fbk * Idc1SF + idc2Fbk * Idc2SF) > IdcHL))
+         {
+             if(fastOCTimer < FAST_OC_MS) fastOCTimer++;
+         }
+         else fastOCTimer = 0;
+
+         if((fastOCTimer >= FAST_OC_MS) && !fastOCTrip)
+         {
+             DISABLE_PWM();
+             pwmEnabled = FALSE;
+             fastOCTrip = TRUE;
+             faultFlag |= BIT00;     // cause latched for the GUI/display until RESET
+         }
 //-----------------------------------
          lpf_ifback.u = cur_fback_remote;
          LOWPASSFILTER(lpf_ifback);

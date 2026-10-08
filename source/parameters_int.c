@@ -31,7 +31,7 @@ const PARAM_INT defaultValuesInt[] = {
                                       {0,1,0}, /* unitOncmd 208 */
                                       {10,1000,20}, /* CANFailDelay 209 */
                                       {20,1000,20}, /* BalancingRate 210 */
-                                      {0,200,0}, /* vbOffset 211 */
+                                      {1,12,3}, /* AverageCount 211: DC average = 1/3 cycle */
                                       {0,200,0}, /* irOffset 212 */
                                       {0,200,0}, /* iyOffset 213 */
                                       {0,200,0}, /* ibOffset 214 */
