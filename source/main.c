@@ -886,6 +886,10 @@ void update_rmsmeters(void)
         SCALE_DCVAL_FLT(vdcFbk,VdcSF, lpf32_vdc, Vdc);
         SCALE_DCVAL_FLT(idc1Fbk,Idc1SF, lpf32_idc1, Idc1);
         SCALE_DCVAL_FLT(idc2Fbk,Idc2SF, lpf32_idc2, Idc2);
+        // Bridge currents can't be negative: offset residue below 0 A is
+        // shown as 0 (display / alarms only; control uses idc1Fbk/idc2Fbk)
+        if(Idc1 < 0) Idc1 = 0;
+        if(Idc2 < 0) Idc2 = 0;
 
         //Average8
         if(CurrentSensingMode) IdcTotal = Idc1 + Idc2;
