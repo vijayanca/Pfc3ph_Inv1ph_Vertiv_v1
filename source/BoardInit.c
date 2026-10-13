@@ -8,11 +8,12 @@
  *  MCU   : TMS320F28P550SG9PZR (100-pin PZ)
  *  Pin numbers / signal names follow board_pin_map.h.
  *
- *  12-pulse rectifier use of the common board:
- *   - ePWM1..6 A/B (GPIO0..11) : SCR firing pulses, bridge 1 and bridge 2
- *   - ePWM7 module             : ADC trigger timebase only (ePWM7_Init in pwm.c).
- *                                Its pins GPIO12/13 are the static-switch
- *                                outputs (STAT_INV / STAT_BYP) as plain GPIO.
+ *  3-phase inverter use of the common board:
+ *   - ePWM1..3 A/B (GPIO0..5)  : inverter bridge 1 (U30 -> CON15)
+ *   - ePWM4..6 A/B (GPIO6..11) : bridge 2 (CON19), not used, held off
+ *   - ePWM7 A/B (GPIO12/13)    : static switch gate pulse trains
+ *                                (STAT_INV / STAT_BYP), StaticSwitchDrivesInit()
+ *   - ePWM8 module             : ADC trigger timebase only (AdcTriggerInit, pwm.c)
  */
 
 #define CCEXTERN    extern
@@ -125,10 +126,10 @@ void GpioInit(void)
     GpioCtrlRegs.GPAMUX1.bit.GPIO11     = 1;
 
     // Static switch commands -> U33 Q6/Q7 -> CON24
-    // Set STAT_USE_EPWM7 to 1 if they need to be PWM (EPWM7A/B).
-    // Keep 0 for the rectifier: the ePWM7 module is the ADC trigger timebase.
+    // STAT_USE_EPWM7 = 1: gate pulse trains from EPWM7A/B (inverter).
+    // 0: plain GPIO outputs.
 #ifndef STAT_USE_EPWM7
-#define STAT_USE_EPWM7  0
+#define STAT_USE_EPWM7  1       // inverter: gate pulse trains from EPWM7 (pwm.c)
 #endif
     GpioCtrlRegs.GPAPUD.bit.GPIO12      = 1;    // STAT_INV  pin 51
     GpioCtrlRegs.GPAPUD.bit.GPIO13      = 1;    // STAT_BYP  pin 50
@@ -365,15 +366,8 @@ void ConfigureADC(void)
 
     DELAY_US(2000);         // ADC power-up
 
-    // ADC trigger: EPWM7 SOCA at period (main: setupADC(ADC_TRIGGER_EPWM7_SOCA, ..)).
-    // The rectifier uses ePWM1..6 for SCR firing, so the ePWM7 module stays the
-    // ADC timebase (ePWM7_Init in pwm.c). Only its pins (GPIO12/13) are used
-    // elsewhere on this board, as plain GPIO (STAT_USE_EPWM7 = 0).
-    EALLOW;
-    EPwm7Regs.ETSEL.bit.SOCASEL = ET_CTR_PRD;
-    EPwm7Regs.ETPS.bit.SOCAPRD  = ET_1ST;
-    EPwm7Regs.ETSEL.bit.SOCAEN  = 1;
-    EDIS;
+    // ADC trigger: EPWM8 SOCA at period, set up in AdcTriggerInit() (pwm.c);
+    // main: setupADC(ADC_TRIGGER_EPWM8_SOCA, ..)
 }
 
 /*

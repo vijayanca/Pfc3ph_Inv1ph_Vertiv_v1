@@ -319,6 +319,50 @@ N16  eeprom_read_word(Uint16 addr)
 
     }
 
+//----------------------------------------------------------------------------
+// Inverter application interface (same calls as the inverter firmware family):
+// addr = EEPROM byte address, n = number of 16-bit words via spiWriteBuffer /
+// spiReadBuffer. Callers write whole 64-byte blocks inside one 128-byte page.
+//----------------------------------------------------------------------------
+void eeprom_write(Uint16 addr, N8 n)
+{
+    eeprom_write_words(addr, spiWriteBuffer, n);
+}
+
+void eeprom_read(Uint16 addr, N8 n)
+{
+    eeprom_read_words(addr, spiReadBuffer, n);
+}
+
+void WriteRecordPointer(void)
+{
+    if (recordWriteTimer == 0)
+    {
+        spiWriteBuffer[0] = RecordNumber;
+        eeprom_write(EP_PACKET_NUM, 2);
+        DELAY_US(2000);
+
+        old_RecordNumber = RecordNumber;
+    }
+}
+
+// Clear the event log (Modbus read of log record 5000): the MAXPACKETS
+// records of RECSIZE words from LOGSTART are overwritten with 0xFFFF one page
+// at a time (each write waits for its EEPROM write cycle, ~0.5 s in total).
+void EraseEventLog(void)
+{
+    static Uint16 blank[64];        // one 128-byte page
+    Uint16 n;
+    Uint16 addr;
+
+    for(n = 0; n < 64; n++) blank[n] = 0xFFFF;
+
+    for(addr = LOGSTART; addr < (LOGSTART + (Uint16)MAXPACKETS * RECSIZE * 2U); addr += 128U)
+        eeprom_write_words(addr, blank, 64);
+
+    RecordNumber = 0;
+}
+
 //===========================================================================
 // No more.
 //===========================================================================

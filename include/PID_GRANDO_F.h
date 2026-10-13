@@ -46,30 +46,23 @@ void PID_GRANDO_F_init(PID_GRANDO_F_CONTROLLER *v);
 void PID_GRANDO_F_FUNC(PID_GRANDO_F_CONTROLLER *v);
 
 //*********** Macro Definition ***********//
-
-#define PID_GRANDO_F_MACRO(v)                                                           \
-    /* proportional term */                                                             \
-    v.data.up = (v.param.Kr * v.term.Ref) - v.term.Fbk;                               \
-                                                                                        \
-    /* derivative term (compute before integral) */                                     \
-    v.data.d2 = (v.param.Kd * (v.term.c1 * ((v.term.Ref * v.param.Km) - v.term.Fbk)))\
-                - (v.term.c2 * v.data.d2);      \
-    v.data.ud = v.data.d2 + v.data.d1;                                                 \
-    v.data.d1 = v.term.c2 * v.data.ud;           \
-                                                                                        \
-    /* integral term with anti-windup */                                                \
-    v.data.ui = (v.param.Ki * (v.term.Ref - v.term.Fbk)) + v.data.i1;                 \
-                                                                                        \
-    /* pre-saturated output */                                                          \
-    v.data.v1 = v.param.Kp * (v.data.up + v.data.ui + v.data.ud);                     \
-                                                                                        \
-    /* saturate output */                                                               \
-    v.term.Out = fmaxf(fminf(v.param.Umax, v.data.v1), v.param.Umin);                 \
-                                                                                        \
-    /* anti-windup: freeze integrator when saturated */                                 \
-    if (v.term.Out == v.data.v1)                                                        \
-        v.data.i1 = v.data.ui;           /* not saturated: update normally */          \
-    else                                                                                \
-        v.data.i1 = v.data.i1;           /* saturated: hold integrator */
+#define PID_GRANDO_F_MACRO(v)																		\
+	/* proportional term */ 																		\
+	v.data.up = (v.param.Kr* v.term.Ref) - v.term.Fbk;												\
+																									\
+	/* integral term */ 																			\
+	v.data.ui = (v.param.Ki* (v.data.w1* (v.term.Ref - v.term.Fbk))) + v.data.i1;					\
+	v.data.i1 = v.data.ui;																			\
+																									\
+	/* derivative term */ 																			\
+	v.data.d2 = (v.param.Kd* (v.term.c1* ((v.term.Ref* v.param.Km) - v.term.Fbk))) - v.data.d2;		\
+	v.data.ud = v.data.d2 + v.data.d1;																\
+	v.data.d1 = (v.data.ud* v.term.c2);																\
+																									\
+	/* control output */ 																			\
+	v.data.v1 = (v.param.Kp* (v.data.up + v.data.ui + v.data.ud));									\
+	v.term.Out= __fmax((__fmin(v.param.Umax,v.data.v1)),v.param.Umin);								\
+	v.data.w1 = (v.term.Out == v.data.v1) ? (1.0) : (0.0);											\
+	
 
 #endif /* PID_GRANDO_F_H_ */

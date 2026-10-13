@@ -2,109 +2,116 @@
  Orion Technologies. Copyright (C) Feb 2023
  139, Shanti Industrial Esate, Mulund West, Mumbai-80
  -----------------------------------------------------------------------------------
- Project Name	: 12 Pulse Rectifier - 3 Phase
- Work Order	  	: VERTIV
+ Project Name	: PFC 3PH
+ Work Order	  	: MAGNAFLEX
  Software Code 	: 01??
  File Name 	  	: Main.C
- Description	: This is the main file for the Texas Instruments' TMS320F280025 DSP
+ Description	: This is the main file for the Texas Instruments' TMS320F28035 DSP
  controller. This  file  contains  the  scheduler and functions for
  interfacing	to the peripheral cards.
- Date Created  	: 10 January 2023
+ Date Created  	: 01 Aug 2023
  Authors		: Vijayan C A
  History Log	: Following Changes Carried out by Vijayan C A
  ----------------------------------------------------------------------------------\
  | Date	      | Ver	   | 			Description of Modification		 	 | Bug Nbr |
  |------------|--------|-------------------------------------------------|---------|
+ | 20/06/2024 | 00AB   | Paralleling with output current                 |         |
  |            |        |                                                 |         |
- | 14/06/2024 | 00AC   | New Board with 12 DIs & 16 DOs                  |         |
+ | 06/08/2023 | 00AA   | Initial Project                                 |         |
  |            |        |                                                 |         |
- | 21/03/2023 | 00AB   | 12 PULSE CONTROL                                |         |
- |            |        |     											 |		   |
- | 10/01/2023 | 00AA   | Initial Version								 |		   |
  |            |        |        										 |		   |
  **********************************************************************************/
 
+
 /*------------------------------------------------------------------------------
  External Function Declarations here
-------------------------------------------------------------------------------*/
-
+ ------------------------------------------------------------------------------*/
 #define	CCEXTERN
-#define	INIT0	    = 0
-#define	INITARRAY0  = {0}
-#define	rbuf	    spiReadBuffer
-#define	wbuf	    spiWriteBuffer
+#define	INIT0	= 0
+#define	INITARRAY0 = {0}
+#define MATH_TYPE FLOAT_MATH
 
 #include "f28x_project.h"
 #include "../ccVariables.h"
 #include "device.h"
 #include "math.h"
-#include "board_pin_map.h"
-
-
-extern __interrupt void MCANIntr1ISR(void);
-extern __interrupt void MCANARxISR(void);
-extern interrupt void AdcISR(void);
-extern __interrupt void SCIARx_ISR(void);
+extern __interrupt void MCANIntr1ISR(void);    // CAN-B paralleling RX
+extern __interrupt void MCANARxISR(void);      // CAN-A display writes
+extern __interrupt void AdcISR(void);
+extern __interrupt void SCIRxISR(void);
 extern __interrupt void SCIBRx_ISR(void);
 extern __interrupt void cpu_timer0_isr(void);
 extern __interrupt void cpu_timer1_isr(void);
 extern __interrupt void cpu_timer2_isr(void);
+extern __interrupt void EPWM_INV_ISR(void);
+void storeEvents(void);
+void EventLogging(void);
 
-#pragma DATA_SECTION(ArrayParamsI, "BIG_ARRAYS")
+
+#define scaleREF(x,y,z) z = x*y
+N16 rebirth = 0;
+
+extern const PARAM defaultValues[];
+char tchr[16];
+
+#ifdef _FLASH
 #pragma DATA_SECTION(ArrayParamsF, "BIG_ARRAYS")
+#pragma DATA_SECTION(ArrayParamsI, "BIG_ARRAYS")
 #pragma DATA_SECTION(waveBuffer, "BIG_ARRAYS")
 #pragma DATA_SECTION(rx_buffer, "BIG_ARRAYS")
+#endif
 
-void    UpdateBatteryLevels(void);
-//inline void ControlLoop(void);
-extern const PARAM *paramptr;
-//------------------------------------------------------------------------------
-/*------------------------------------------------------------------------------
- Functions that will be run from FLASH linker cmd file.
- ------------------------------------------------------------------------------*/
-// 12345678901234567890
+#define DI_UNITON           0x0001
+#define DI_RESET            0x0002
+#define DI_MAINSFAIL        0x0004
+#define DI_MANUALBYP        0x0008
+#define DI_OUTMCB           0x0010
+#define DI_BYPMCB           0x0020
+#define DI_HSTEMP           0x0040
+#define DI_EPO              0x0080
 
-extern char *defaultSerial;
-volatile Uint16 oldSec = 0;
-volatile Uint16 result = 0;
-uint32_t base = SPIA_BASE;
 
-N16 a =10, b =20, c= 30, d = 0;
+ void main(void) {
 
-Uint16 notEnabled = TRUE;
-float vdcRef_old = 0;
-float ibatref_old = 0;
-
-#define PULSEFILL_COUNT 5000
-
- extern void ePWM7_Init();
-  N16    secNow = 0;
- void main(void)
- {
 	//Device_init();
-	InitSysCtrl(); // Initialize System Control....PLL, WatchDog, enable Peripheral Clocks
-	InitGpio();
-	InitVariables();
-	cyclePoints = 200;
 
+    InitSysCtrl(); // Initialize System Control....PLL, WatchDog, enable Peripheral Clocks
 	InitPieCtrl(); // Initialize the PIE control registers to their default state.
 	InitCpuTimers();
 
 	DINT;
 	//--------------------------------------------------------------------------
-	EALLOW;       // Clear all interrupts and initialize PIE vector table:
-        IER = 0x0000; // Disable CPU interrupts and clear all CPU interrupt flags:
-        IFR = 0x0000;
+	    EALLOW;	// Clear all interrupts and initialize PIE vector table:
+	    IER = 0x0000; // Disable CPU interrupts and clear all CPU interrupt flags:
+	    IFR = 0x0000;
 	EDIS;
 	//--------------------------------------------------------------------------
 
-	InitPieVectTable(); // Initialize the PIE vector table with pointers
-    GpioInit(); // Initialize GPIO 00 for Yphase PWM output
+	InitPieVectTable(); //Initialize the PIE vector table with pointers
+	                    // to the shell Interrupt	 Service Routines (ISR)
+	GpioInit();             // Common Controller v2: relays off first, PWM pins, DIs (BoardInit.c)
+	InitFaultXbar();        // VCESAT1 -> INPUTXBAR1, VCESAT2 -> INPUTXBAR2
     SysCtl_setMCANClk(SYSCTL_MCANA, SYSCTL_MCANCLK_DIV_3);
     SysCtl_setMCANClk(SYSCTL_MCANB, SYSCTL_MCANCLK_DIV_3);
-    ePWM7_Init();
-  //  EPWM8_TimebaseInit_WithCmpInt();
-    initZCD_ECAP1_GPIO47();
+	InitVariables();
+
+    // Bridge 1 (EPWM1-3, U30 -> CON15): the inverter
+    ePWMInit_INV(1, 2, 3);
+    DISABLE_PWM();
+    DesatTripInit();        // VCESAT1 (active high) -> one-shot trip of EPWM1-3
+
+    // Bridge 2 (EPWM4-6, U33 -> CON19): not used, outputs held low
+    InitDrives(4);
+    InitDrives(5);
+    InitDrives(6);
+    BRIDGE2_OFF();
+
+    StaticSwitchDrivesInit();   // EPWM7A STAT_INV / EPWM7B STAT_BYP gate pulse trains, off
+    STATIC_DRIVES_OFF();
+    AdcTriggerInit();           // EPWM8 SOCA, 20 kHz ADC trigger
+
+	LimitFlagInv.all = 0x7;
+	SystemFlag.all = 0x01; // POWERINGUP + INPUTDC FAULT + BOOSTER1&2 DISABLE + INVRTER DISABLE
 
 	EALLOW;
 	// Interrupts are re-mapped to ISR functions
@@ -112,1048 +119,583 @@ float ibatref_old = 0;
 	PieVectTable.TIMER0_INT = &cpu_timer0_isr;
 	PieVectTable.TIMER1_INT = &cpu_timer1_isr;
 	PieVectTable.TIMER2_INT = &cpu_timer2_isr;
-	PieVectTable.ADCA1_INT = &AdcISR;
 
-	PieVectTable.SCIA_RX_INT = &SCIARx_ISR;
-	PieVectTable.SCIB_RX_INT = &SCIBRx_ISR;
-	PieVectTable.MCANB_0_INT = &MCANIntr1ISR;   // paralleling RX on CAN-B
-	PieVectTable.MCANB_1_INT = &MCANIntr1ISR;
-	PieVectTable.MCANA_0_INT = &MCANARxISR;     // display writes on CAN-A
-	PieVectTable.MCANA_1_INT = &MCANARxISR;
+    PieVectTable.EPWM1_INT = &EPWM_INV_ISR;
+    PieVectTable.ADCA1_INT = &AdcISR;
+    PieVectTable.SCIA_RX_INT = &SCIRxISR;
+    PieVectTable.SCIB_RX_INT = &SCIBRx_ISR;
+    PieVectTable.MCANB_0_INT = &MCANIntr1ISR;   // paralleling RX on CAN-B
+    PieVectTable.MCANB_1_INT = &MCANIntr1ISR;
+    PieVectTable.MCANA_0_INT = &MCANARxISR;     // display writes on CAN-A
+    PieVectTable.MCANA_1_INT = &MCANARxISR;
 
-    AdcaRegs.ADCINTSEL1N2.bit.INT1E = 1;
-    AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 6;
+#ifdef SLOW_SAMPLING
+	ConfigCpuTimer(&CpuTimer0, SYSTEM_FREQUENCY, 100);
+#else
+	ConfigCpuTimer(&CpuTimer0, SYSTEM_FREQUENCY, 50);
+#endif
+	ConfigCpuTimer(&CpuTimer1, SYSTEM_FREQUENCY, 1000);
+	ConfigCpuTimer(&CpuTimer2, SYSTEM_FREQUENCY, 10000);
 
-    //ConfigCpuTimer(&CpuTimer0, SYSTEM_FREQUENCY, 50.0);
-    ConfigCpuTimer(&CpuTimer2, SYSTEM_FREQUENCY, 1000);
-    //ConfigCpuTimer(&CpuTimer2, SYSTEM_FREQUENCY, 10000);
+	CpuTimer0Regs.TCR.all = 0x4000; // Use write-only instruction to set TSS bit = 0
+	CpuTimer1Regs.TCR.all = 0x4000; // Use write-only instruction to set TSS bit = 0
+	CpuTimer2Regs.TCR.all = 0x4000; // Use write-only instruction to set TSS bit = 0
 
-	CpuTimer0Regs.TCR.all = 0x4000;
-	CpuTimer1Regs.TCR.all = 0x4000;
-	CpuTimer2Regs.TCR.all = 0x4000;
-
-	// Enable EPwm INTn in the PIE: Group 3 interrupt 1-3
-	PieCtrlRegs.PIEIER1.bit.INTx1 = 1; // Enable INT 1.1 ADCA
-    PieCtrlRegs.PIEIER9.bit.INTx1 = 1; // PIE group 9 - for SCIA RX
-    PieCtrlRegs.PIEIER9.bit.INTx3 = 1; // PIE group 9 - for SCIB RX
-    PieCtrlRegs.PIEIER9.bit.INTx8 = 1;   // MCANA_1 (9.8): CAN-A display writes, line 1
-    PieCtrlRegs.PIEIER9.bit.INTx10 = 1;  // MCANB_1 (9.10): CAN-B paralleling RX, line 1
-
-	PieCtrlRegs.PIEIER1.bit.INTx7 = 1; // Timer0
-
-    InitDrives(1);
-    InitDrives(2);
-    InitDrives(3);
-    InitDrives(4);
-    InitDrives(5);
-    InitDrives(6);
-
-    ALL_DRIVES_OFF();
-    DISABLE_PWM();
-
-    IER |= M_INT1;  // Enable CPU Interrupt 0
-    IER |= M_INT3;  // Enable CPU INT3 for PWM
-	IER |= M_INT9;  //SCI-A CANA
-	IER |= M_INT13; // Enable CPU Timer 1;
-	IER |= M_INT12; // Enable CPU Timer 1;
-	IER |= M_INT14; // Enable CPU Timer 2;
-	EDIS;
+    EDIS;
 
     ConfigureADC();
-    setupADC(ADC_TRIGGER_EPWM7_SOCA, 44); //EPM1 Trigger
+    setupADC(ADC_TRIGGER_EPWM8_SOCA, 44);   // CCv2 SOC map; ADCA INT1 on EOC4
 
-	XintRegs.XINT1CR.bit.ENABLE = FALSE;    // Enable XINT1#
-	XintRegs.XINT2CR.bit.ENABLE = FALSE;    // Enable XINT2
-	XintRegs.XINT3CR.bit.ENABLE = FALSE;    // Enable XINT3
+EALLOW;
+	//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+	PieCtrlRegs.PIEIER1.bit.INTx1 = 1;   // 1.1 ADCA1
+    PieCtrlRegs.PIEIER1.bit.INTx7 = 1;   // 1.7 TIMER0
+	PieCtrlRegs.PIEIER3.bit.INTx1 = 1;   // 3.1 EPWM1 (inverter modulator)
+	PieCtrlRegs.PIEIER9.bit.INTx1 = 1;   // 9.1 SCIA RX
+    PieCtrlRegs.PIEIER9.bit.INTx3 = 1;   // 9.3 SCIB RX
+    PieCtrlRegs.PIEIER9.bit.INTx8 = 1;   // 9.8 MCANA_1: CAN-A display writes
+    PieCtrlRegs.PIEIER9.bit.INTx10 = 1;  // 9.10 MCANB_1: CAN-B paralleling RX
 
-	EINT;	// Enable global Interrupts and higher priority
+    EPwm1Regs.ETSEL.bit.INTEN = 1; // Enable EPWM1INT generation
+    EPwm1Regs.ETSEL.bit.INTSEL = 1; // Enable interrupt CNT_zero event
+    EPwm1Regs.ETPS.bit.INTPRD = 1; // Generate interrupt on the 1st event
+    EPwm1Regs.ETCLR.bit.INT = 1; // Enable more interrupts
+
+    //Enable CPU INT3 which is connected to EPwm1-3 INT:trip
+
+    IER |= M_INT3; // Enable CPU INT3 for PWM
+    IER |= M_INT1; // Enable CPU Interrupt 0
+    IER |= M_INT9; //serial + CAN
+    IER |= M_INT13; // Enable CPU Timer 1;
+    IER |= M_INT14; // Enable CPU Timer 2;
+EDIS;
+
+	EINT;
+	// Enable global Interrupts and higher priority
 	ERTM;
+	// real-time debug events:
 
 	//Initialising Params
-	delay_ms(500);
+	address = 1;
+	address1 = 1;
+	rxChar = 0;
+
+    InitSCIA(0);    // SCIA RS485 #2, fixed 115200 (BoardInit.c)
+    InitSCIB();     // SCIB RS485 #1, GUI port
+    DisableTX();
+    DisableTX1();
+
     spi_init();
-    delay_ms(100);
+
+	InitVariables();
+
+	msDelayCount = 500;
+	while (msDelayCount); // wait for 0.5 sec
 
 	RestoreSettings();
+	updateRAMvalues(0);	//setting parameters
+	RestoreSettingsInt();
 
-	msDelayCount = 20;
-    while (msDelayCount); // wait for 0.05 sec
+	updateRAMvalues(0); //setting parameters
 
-    RestoreSettingsInt();
-    updateRAMvalues(0); //setting parameters
+	if((UnitAddress>0) && (UnitAddress<7))
+	                address = UnitAddress;
+	address1 = address;     // same Modbus address on both ports
 
-    InitSCIA(BaudRate);
-    InitSCIB();
-    if((DeviceID>0) && (DeviceID<3))
-    {
-        address = DeviceID;
-        address1 = DeviceID;
-    }
-    else { address = 1; address1 = 1; }
+	if(address==1) PowerOnDelay = 3000;
 
-    InitHiLoParams();
-    InitRelays();
+//	if(address==1) PowerOnDelay = 3000;
+//    else PowerOnDelay = address*1000 + 2000;
 
-    DisableTX();
-    InitPLL(&pllGrid);
-
-    LimitFlag.all  = 0x0000;    //setting Low
-    SystemFlag.bit.POWERINGUP = TRUE;
- //   CAN_enableGlobalInterrupt(CANA_BASE, CAN_GLOBAL_INT_CANINT0);
- //   UnitOnCommand = FALSE;
-    Batt_TestMode = FALSE;
-    DO_TestFlag = FALSE;
-
-#if RTC_PRESENT
-    ReadTime();
-    secNow = RTCSecond;
-    delay_ms(1050);
-    ReadTime();
-    if(secNow == RTCSecond) EnableRTCClock();
-#else
-    delay_ms(1050);     // no RTC (mcp79522.c excluded): keep the start-up timing
-#endif
-
-    InitECAN();     // MCANA (GPIO30/31) and MCANB (GPIO18/19) pin mux
-    InitMCAN();     // CAN-A display broadcast, CAN-B paralleling
+	InitHiLoParams();
+    InitMCANPins();     // MCANA GPIO30/31, MCANB GPIO18/19
+    InitMCAN();         // CAN-A display, CAN-B paralleling (mcanInterface.c)
     MCAN_enableIntr(MCANB_DRIVER_BASE, MCAN_INTR_MASK_ALL, 1U);
     MCAN_selectIntrLine(MCANB_DRIVER_BASE, MCAN_INTR_MASK_ALL, MCAN_INTR_LINE_NUM_1);
     MCAN_enableIntrLine(MCANB_DRIVER_BASE, MCAN_INTR_LINE_NUM_1, 1U);
     MCAN_enableIntr(MCANA_DRIVER_BASE, MCAN_INTR_SRC_RX_FIFO1_NEW_MSG, 1U);
     MCAN_selectIntrLine(MCANA_DRIVER_BASE, MCAN_INTR_MASK_ALL, MCAN_INTR_LINE_NUM_1);
     MCAN_enableIntrLine(MCANA_DRIVER_BASE, MCAN_INTR_LINE_NUM_1, 1U);
-    freqNotSet = TRUE;
- //   InitCapture();
-    vdc_inc = 0.004;
-    idc_inc = 0.004;
-    ManualModeSelect = 0;
-    OpenLoop = 0;
-
-    count30_SP1 = 2083;
-    count30_SP2 = 2083;
-    count_60 = 4166;
-    count_30 = count_60 >> 1;
-
-    if(GridFrequency == 60)
-    {
-        count30_SP1 = 1736;
-        count30_SP2 = 1736;
-        count_60 = 3472;
-        count_30 = count_60 >> 1;
-    }
-
-    OffsetNotDone = TRUE;
-    FilledPulse = TRUE;
+	SystemFlag.bit.POWERINGUP = TRUE;
+	UPDATE_INV_FSW();
+	OffsetNotDone = TRUE;
 
 	while (1)
 	{
-		InverterApplication();
-		UpdateDigitalIO();
+	    InverterApplication();
 		updateStatus();
-		EventLogging();
-		storeEvents();
 
-        ModbusProcessing();
-        ModbusProcessing1();
-        MCANBusProcessing();
-
+		ModbusProcessing();
+		ModbusProcessing1();
+		MCANBusProcessing();
 
         if (rms_update_flag)
             {
                 update_rmsmeters();
-                rms_update_flag = 0;
             }
 
-        if (seconds!= seconds_old)
-        {
+		if (seconds!= seconds_old)
+		{
             seconds_old = seconds;
-#if RTC_PRESENT
-            ReadTime();
-#endif
-          //  updateRelays();
 
-            if(Vdc_Ref> 0.05) vdc_inc = Vdc_Ref * 0.01;
-            if(Idc_Ref> 0.05) idc_inc = Idc_Ref * 0.01;
+		    if(seconds==30) { InitSCIA(0); InitSCIB(); }
+		    if(errorRx) InitSCIA(0);
 
-            if((seconds%30)==0) {
-                                    InitSCIA(BaudRate);
-                                    InitECAN();
-                                    InitMCAN();
-                                    InitSCIB();
-                                }
+		    // Re-initialise a CAN module only if it went bus-off: a periodic
+		    // re-init would interrupt the master's angle stream on CAN-B
+		    if(MCANBusOff()) { InitMCAN(); }
+		}
+	    EventLogging();
+	    storeEvents();
+//-----------------------------------------------------------------------------
 
-            if(errorRx) InitSCIA(BaudRate); //BaudRate
+	    if(specialCommnad == CMD_DEFAULT)
+	        {
+	            SetFactoryDefaults();
+	            SetFactoryDefaultsInt();
+	            specialCommnad = 0;
+	        }
 
-            if(LimitFlag.bit.CANFAIL && (canInitTimer==0))
-            {
-                InitECAN();
-                InitMCAN();
-                canInitTimer = 5000;
-            }
+	    if(autoSaveFlag)
+	    {
+	        UpdateOneInt(ADR_COMMIT, 1);
+	        autoSaveFlag = FALSE;
+	    }
 
-                if(specialCommnad == CMD_DEFAULT)
-                    {
-                        SetFactoryDefaults();
-                        SetFactoryDefaultsInt();
-                        specialCommnad = 0;
-                    }
-                if(address==1) CAN_TxInterval = 1;
-                else CAN_TxInterval = 20;
-        } //seconds
+	   UpdateRelayFlag();
+	   UpdateRelays();
 
-        if(autoSaveFlag)
-        {
-            UpdateOneInt(ADR_COMMIT, 1);
-            autoSaveFlag = FALSE;
-        }
+	   Pair_StatusFlag = PairStatusFlag.all ;
 
-//        if(doPID)
-//        { ControlLoop(); doPID = FALSE; }
+	} //End of Infinite for loop
+} // End Of Main
 
-    }   //End of Infinite for loop
-}       // End Of Main
+#define DI_BTEST    0x04
 
-Uint16 noInit = 0;
- void InverterApplication(void)
- {
-     if (SystemFlag.bit.POWERINGUP)
-     {
-         notEnabled = TRUE;
-         reason = 1;
-         pwmEnabled = FALSE;
-         return;
-     }
-
-     if(SystemFlag.bit.RECTON && (WaitDelayTimer == 0) ) SystemFlag.bit.UNITON = TRUE;
-     else SystemFlag.bit.UNITON = FALSE;
-
-     if(!SystemFlag.bit.RECTON)
-     {
-             GridFrequency = 50.0;
-             OmegaDefault = 0.015707963;
-             PLL_Lock_Min = 0.014922565;
-             PLL_Lock_Max = 0.016493361;
-             FullCycle = 400;
-             MinPoints = 360;
-             MinPeriod = 16;
-
-        freqNotSet = FALSE;
-     }
-
-
-     if(runModeSelect) { SM_FloatBoost(); runModeSelect = FALSE; }
-
-     if((SysOkFlag.bit.MAINSOK || TestMode) && !SystemFlag.bit.WRONGSEQ &&
-             (UnitOnCommand || unitOncmd) && !SystemFlag.bit.TRIPFAULT )
-     {
-
-         if(!SystemFlag.bit.RECTON)
-         {
-             soft_VdcRef = vdcFbk;
-             soft_IdcRef = IdcFback;
-             soft_IbatRef = ibatFbk;
-
-       //  if(soft_VdcRef < (Vdc_Ref * 0.25))
-         {
-             InitPID(&pid_vdc);
-             InitPID(&pid_idc);
-             InitPID(&pid_idc1);
-             InitPID(&pid_idc2);
-             InitPID(&pid_ibat);
-         }
-             CycleCount = 0;
-             pwmEnabled = TRUE;
-             ncycle = 0;
-             SystemFlag.bit.SOFTSTART = TRUE;
-             reason = 2;
-             SystemFlag.bit.RECTON = TRUE;
-             opMode = modeFLOAT;
-             BattFlag.bit.FLOATMODE = TRUE;
-         }
-         reason = 3;
-     }
-     else
-     {
-         SystemFlag.bit.RECTON = FALSE;
-         pwmEnabled = FALSE;
-         soft_VdcRef = vdcFbk;
-         soft_IdcRef = IdcFback;
-         soft_IbatRef = ibatFbk;
-         DISABLE_PWM();
-         RP1 = RN1 = YP1 = YN1 = BP1 = BN1 = 0;
-         RP2 = RN2 = YP2 = YN2 = BP2 = BN2 = 0;
-     }
-
-
-     return;
- }
- N16 tmpRelay1 = 0;
- N16 tmpRelay2 = 0;
- N16 tmpRelay3 = 0;
- N16 tmpTripRelay1 = 0;
-
-void    UpdateRelayBits(void)
+void InverterApplication(void) //sequencing
 {
-    N16 u=0;
-    tmpRelay1 = 0;
-    tmpRelay2 = 0;
-    tmpRelay3 = 0;
+//float32_t tempVar = 0;
 
-    for(u=4;u<12;u++)
-         {
-            if(ArrayParamsI[MAIN_RLY_SIG_START + u])
-            {
-              if(DOParams[ArrayParamsI[MAIN_RLY_SIG_START + u]-1])
-                 {
-                     MainConRLY[u].Enable = TRUE;
-                 }
-              else
-                  {
-                     MainConRLY[u].Enable = FALSE;
-                     MainConRLY[u].RelayOn = FALSE;
-                  }
-            }
-            else {
-                    MainConRLY[u].Enable = FALSE;
-                    MainConRLY[u].RelayOn = FALSE;
-                }
-
-             if(MainConRLY[u].RelayOn) tmpRelay1 |= (1 << u);
-         }
-
-
-
-    for(u=0;u<16;u++)
-         {
-        if(ArrayParamsI[IOM1_RLY_SIG_START + u])
+    if (SystemFlag.bit.POWERINGUP || EmergencyStop)
         {
-            if(DOParams[ArrayParamsI[IOM1_RLY_SIG_START + u]-1]) IOM1RLY[u].Enable = TRUE;
-             else { IOM1RLY[u].Enable = FALSE; IOM1RLY[u].RelayOn = FALSE; }
+            DISABLE_PWM();
+            pwmEnabled = FALSE;
+            reason= 1;
+            SystemFlag.bit.INVRTRDISABL = TRUE;
+            SystemFlag.bit.OVERLOAD = FALSE;
+            return;
         }
-        else {
-                IOM1RLY[u].Enable = FALSE;
-                IOM1RLY[u].RelayOn = FALSE;
-            }
 
-        if(ArrayParamsI[IOM2_RLY_SIG_START + u])
-        {
-             if(DOParams[ArrayParamsI[IOM2_RLY_SIG_START + u]-1]) IOM2RLY[u].Enable = TRUE;
-             else {IOM2RLY[u].Enable = FALSE;  IOM2RLY[u].RelayOn = FALSE; }
-         }
-         else { IOM2RLY[u].Enable = FALSE; IOM2RLY[u].RelayOn = FALSE; }
 
-             if(IOM1RLY[u].RelayOn) tmpRelay2 |= (1 << u);
-             if(IOM2RLY[u].RelayOn) tmpRelay3 |= (1 << u);
+    if (SystemFlag.bit.TRIPFAULT)
+    {
+        DISABLE_PWM();
+        pwmEnabled = FALSE;
+        SystemFlag.bit.INVRTRDISABL = TRUE;
+        reason= 2;
+        return;
+    }
 
-         }
-
-    tmpTripRelay1 = 0;
-
-    for(u=0;u<10;u++)
+       if((UnitOnCommand || unitOnCommand) && !EmergencyStop && !SystemFlag.bit.MANUALBYP &&
+               (LimitFlag.bit.DCLINKOK || TestMode) && ((DigitalInputFlag1 & TripBits)==0))
             {
-              if(ArrayParamsI[TRIP_SIG_START + u])
-              {
-               if(DOParams[ArrayParamsI[TRIP_SIG_START + u]-1]) tmpTripRelay1 |= (1 << u);
+
+            if(pwmEnabled == FALSE)
+                  {
+                      //initialise variables, set softstart
+                      UPDATE_INV_FSW();
+                      soft_VdRef = 0.0;
+                      soft_VqRef = 0.0;
+                      volRef_Id = (RatedVoltage*TrxFactor)/VinvRSF;
+
+                      defaultOmega = OMEGADEFAULT;//tempVar >> 10;
+                      InitPID(&vcontrol.vol.pid_de);
+                      InitPID(&vcontrol.vol.pid_qe);
+                      PR_Reset();
+
+//                      StartupTimer = SEC10;
+                      pwmEnabled = TRUE;
+//                      startTimer = 1000;
+                     // ENABLE_PWM();
+                      SystemFlag.bit.SOFTSTART = TRUE;
+                      SystemFlag.bit.INVRTRDISABL = FALSE;
+                      reason = 10;
+                      systemRunningTimer = 0;
+                      // (DSAT: hardware trip, DesatTripInit)
+                  }
               }
-            }
-    TripBitsFlag = tmpTripRelay1;
+             else
+             {
+                 InverterOK_timer = 0;
+                 DISABLE_PWM();
+               //  UnitOnCommand = FALSE;
+                 pwmEnabled = FALSE;
+                 SystemFlag.bit.INVRTRDISABL = TRUE;
 
-    if(Vdc >= Rly1_On_Level) RlyLevelFlag |= BIT0;
-    if(Vdc < Rly1_Off_Level) RlyLevelFlag &= BITC0;
-    if(Vdc >= Rly2_On_Level) RlyLevelFlag |= BIT1;
-    if(Vdc < Rly2_Off_Level) RlyLevelFlag &= BITC1;
-    if(Vdc >= Rly3_On_Level) RlyLevelFlag |= BIT2;
-    if(Vdc < Rly3_Off_Level) RlyLevelFlag &= BITC2;
-    if(Vdc >= Rly4_On_Level) RlyLevelFlag |= BIT3;
-    if(Vdc < Rly4_Off_Level) RlyLevelFlag &= BITC3;
+                 if(reason==0) reason= 6;
+                 if(SystemFlag.bit.TRIPFAULT)
+                 {
+                     reason= 3;
+                 }
 
-    RelayFlag = tmpRelay1 | (RlyLevelFlag & 0x000f);
-    iom1_relayflag1 = tmpRelay2 & 0xff;
-    iom1_relayflag2 = tmpRelay2 >> 8;
+             }
 
-    iom2_relayflag1 = tmpRelay3 & 0xff;
-    iom2_relayflag2 = tmpRelay3 >> 8;
-
-}
+        return;
+    }
 
 
-volatile N16 TimerRunning = 0;
- void updateStatus(void)
- {
-     LimitFlag.bit.MAINSLOW = chkVr.stat.bit.LOW || chkVy.stat.bit.LOW || chkVb.stat.bit.LOW;
-     LimitFlag.bit.MAINSHIGH = chkVr.stat.bit.HIGH || chkVy.stat.bit.HIGH || chkVb.stat.bit.HIGH;
 
-     LimitFlag.bit.VDCLOW = chkVdc.stat.bit.LOW;
-     LimitFlag.bit.VDCHIGH = chkVdc.stat.bit.HIGH;
+#define MIN_VOLTAGE 850
+
+void updateStatus(void)
+{
+    N16 flag1 = 0/*, flag2 = 0*/;
+
+    N16 tempiFlag = 0;
+    LimitFlagInv.bit.INVRLOW = chkVr.stat.bit.LOW;
+    LimitFlagInv.bit.INVRHIGH = chkVr.stat.bit.HIGH;
+    LimitFlagInv.bit.INVYLOW = chkVy.stat.bit.LOW;
+    LimitFlagInv.bit.INVYHIGH = chkVy.stat.bit.HIGH;
+    LimitFlagInv.bit.INVBLOW = chkVb.stat.bit.LOW;
+    LimitFlagInv.bit.INVBHIGH = chkVb.stat.bit.HIGH;
+
+    LimitFlagInv.bit.OC_LEVEL1_R = chkIr1.stat.bit.HIGH;
+    LimitFlagInv.bit.OC_LEVEL1_Y = chkIy1.stat.bit.HIGH;
+    LimitFlagInv.bit.OC_LEVEL1_B = chkIb1.stat.bit.HIGH;
+
+    LimitFlagInv.bit.OC_LEVEL2_R = chkIr2.stat.bit.HIGH;
+    LimitFlagInv.bit.OC_LEVEL2_Y = chkIy2.stat.bit.HIGH;
+    LimitFlagInv.bit.OC_LEVEL2_B = chkIb2.stat.bit.HIGH;
+
+    LimitFlagInv.bit.OC_LEVEL3_R = chkIr3.stat.bit.HIGH;
+    LimitFlagInv.bit.OC_LEVEL3_Y = chkIy3.stat.bit.HIGH;
+    LimitFlagInv.bit.OC_LEVEL3_B = chkIb3.stat.bit.HIGH;
+
+    Lvl1_TimerR = chkIr1.maxTimer/1000;
+    Lvl1_TimerY = chkIy1.maxTimer/1000;
+    Lvl1_TimerB = chkIb1.maxTimer/1000;
+    Lvl2_TimerR = chkIr2.maxTimer/1000;
+    Lvl2_TimerY = chkIy2.maxTimer/1000;
+    Lvl2_TimerB = chkIb2.maxTimer/1000;
+    Lvl3_TimerR = chkIr3.maxTimer/1000;
+    Lvl3_TimerY = chkIy3.maxTimer/1000;
+    Lvl3_TimerB = chkIy3.maxTimer/1000;
 
 
-     LimitFlag.bit.VBATHIGH = chkVbat.stat.bit.HIGH;
+    if(chkIr1.maxTimer || chkIy1.maxTimer || chkIb1.maxTimer)   SystemFlag.bit.OCLVL1ACTIVE = TRUE;
+    else SystemFlag.bit.OCLVL1ACTIVE = FALSE;
+
+    if(chkIr2.maxTimer || chkIy2.maxTimer || chkIb2.maxTimer)   SystemFlag.bit.OCLVL2ACTIVE = TRUE;
+    else SystemFlag.bit.OCLVL2ACTIVE = FALSE;
+
+    if(LimitFlagInv.all & 0x7fc0) SystemFlag.bit.OVERLOAD = TRUE;
+    else SystemFlag.bit.OVERLOAD = FALSE;
+
+    LimitFlag.bit.BYPRLOW = chkVbypr.stat.bit.LOW;
+    LimitFlag.bit.BYPRHIGH = chkVbypr.stat.bit.HIGH;
+    LimitFlag.bit.BYPYLOW = chkVbypy.stat.bit.LOW;
+    LimitFlag.bit.BYPYHIGH = chkVbypy.stat.bit.HIGH;
+    LimitFlag.bit.BYPBLOW = chkVbypb.stat.bit.LOW;
+    LimitFlag.bit.BYPBHIGH = chkVbypb.stat.bit.HIGH;
+
+     SysOkFlag.bit.VINVROK = chkVr.stat.bit.OK;
+     SysOkFlag.bit.VINVYOK = chkVy.stat.bit.OK;
+     SysOkFlag.bit.VINVBOK = chkVb.stat.bit.OK;
+
+
+     SysOkFlag.bit.VBYPROK = chkVbypr.stat.bit.OK;
+     SysOkFlag.bit.VBYPYOK = chkVbypy.stat.bit.OK;
+     SysOkFlag.bit.VBYPBOK = chkVbypb.stat.bit.OK;
+
+     LimitFlag.bit.BYPASSOK = chkVbypr.stat.bit.OK && chkVbypy.stat.bit.OK && chkVbypb.stat.bit.OK;
+     LimitFlag.bit.INVRTROK = chkVr.stat.bit.OK && chkVy.stat.bit.OK && chkVb.stat.bit.OK;
+
+     LimitFlag.bit.DCLINKLOW = chkdcLink.stat.bit.LOW;
+     LimitFlag.bit.DCLINKHIGH = chkdcLink.stat.bit.HIGH;
+     LimitFlag.bit.DCLINKOK = chkdcLink.stat.bit.OK;
+
+     LimitFlag.bit.PREALARM = chkVbatpre.stat.bit.LOW;
      LimitFlag.bit.VBATLOW = chkVbat.stat.bit.LOW;
+     LimitFlag.bit.VBATHIGH = chkVbat.stat.bit.HIGH;
 
-     LimitFlag.bit.IDCHIGH = chkIdc.stat.bit.HIGH;
-     LimitFlag.bit.IBATHIGH = chkIbat.stat.bit.HIGH;
 
-     LimitFlag.all &= 0x3ff;
-     if(LmtMode==1) LimitFlag.bit.CURMODE = TRUE;
-     else if(LmtMode==2) LimitFlag.bit.IBATMODE = TRUE;
-     else if(LmtMode==3) LimitFlag.bit.CURMODE = TRUE;
-     else if(LmtMode==4) LimitFlag.bit.CURMODE = TRUE;
-     else LimitFlag.bit.VOLMODE = TRUE;
+     if( (DigitalInputFlag1 & DI_MAINSFAIL) &&   SysOkFlag.bit.VINVROK) SystemFlag.bit.LOADONBAT = TRUE;
+     else SystemFlag.bit.LOADONBAT = FALSE;
 
-     SysOkFlag.bit.VROK = chkVr.stat.bit.OK;
-     SysOkFlag.bit.VYOK = chkVy.stat.bit.OK;
-     SysOkFlag.bit.VBOK = chkVb.stat.bit.OK;
+     // Hardware desaturation trip (VCESAT1 -> DCAEVT1, DesatTripInit): the pulses
+     // are already off; flag it so the trip / restart / latch logic sees it
+     if(pwmEnabled && EPwm1Regs.TZFLG.bit.DCAEVT1) SystemFlag.bit.VCESAT = TRUE;
 
-     GoodPhases = 0;
-     if(SysOkFlag.bit.VROK) GoodPhases++;
-     if(SysOkFlag.bit.VYOK) GoodPhases++;
-     if(SysOkFlag.bit.VBOK) GoodPhases++;
-     if(GoodPhases == 2) SystemFlag.bit.SINGLEPH = TRUE;
-     else SystemFlag.bit.SINGLEPH = FALSE;
-
-     if((seqFailTimer > 40) && SysOkFlag.bit.MAINSOK) SystemFlag.bit.WRONGSEQ = TRUE;
-     if((seqFailTimer < 5) || !SysOkFlag.bit.MAINSOK) SystemFlag.bit.WRONGSEQ = FALSE;
-
-     SysOkFlag.bit.MAINSOK = chkVr.stat.bit.OK && chkVy.stat.bit.OK && chkVb.stat.bit.OK;
-     SysOkFlag.bit.MAINSFAIL = !SysOkFlag.bit.MAINSOK;
-     SysOkFlag.bit.CHRGRFAIL = LimitFlag.bit.VDCHIGH || LimitFlag.bit.VDCLOW;
-
-     SystemFlag.bit.INPOVERLOAD = chkIr.stat.bit.HIGH || chkIy.stat.bit.HIGH || chkIb.stat.bit.HIGH;
-     if(CANFailDelay == canFailureCount) LimitFlag.bit.CANFAIL = TRUE;
-     else LimitFlag.bit.CANFAIL = FALSE;
-     SystemFlag.bit.BITSVALID = TRUE;
-
-     if(iom1_canFailTimer==0) {IOM1_DI_Flag1 = 0; IOM1_DI_Flag2 = 0;}
-     if(iom2_canFailTimer==0) {IOM2_DI_Flag1 = 0; IOM2_DI_Flag2 = 0;}
-
-     if((AlarmFlag1 & CommonAlarmBits1) || (AlarmFlag2 & CommonAlarmBits2) || (AlarmFlag3 & CommonAlarmBits3) ||
-             (AlarmFlag4 & CommonAlarmBits4) || (AlarmFlag5 & CommonAlarmBits5)
-             || (AlarmFlag6 & CommonAlarmBits6)) LimitFlag.bit.COMMONALARM = TRUE;
-             else LimitFlag.bit.COMMONALARM = FALSE;
-
-     if(!SystemFlag.bit.RECTON) SystemFlag.bit.SOFTSTART = FALSE;
-     AlarmFlag1 = SystemFlag.all;
-     AlarmFlag2 = LimitFlag.all;
-     AlarmFlag3 = DigitalInputFlag1 & 0xfff;
-     AlarmFlag4 = SysOkFlag.all;AlarmFlag4 <<= 8;
-     AlarmFlag4 |=BattFlag.all;
-     AlarmFlag5 = IOM1_DI_Flag2; AlarmFlag5 <<= 8; AlarmFlag5 |= IOM1_DI_Flag1;
-     AlarmFlag6 = IOM2_DI_Flag2; AlarmFlag6 <<= 8; AlarmFlag6 |= IOM2_DI_Flag1;
-     AlarmFlag7 = RelayFlag;
-
-     UpdateBits();
-   //  UpdateRelayBits();
-
-     if (TripBitsFlag || (DigitalInputFlag1 & cfgTripFlag) || fastOCTrip)
+     if (SystemFlag.bit.OVERLOAD || SystemFlag.bit.VCESAT ||
+              (LimitFlagInv.all & 0x7ff8) || EmergencyStop || dcOV)
          {
-             fastOCTrip = FALSE;     // handled here; cause stays in faultFlag
-             if(!SystemFlag.bit.TRIPFAULT)
+             pwmEnabled = FALSE;
+             if(!SystemFlag.bit.TRIPFAULT && !SystemFlag.bit.POWERINGUP)
                  {
                      if(TripCount<MaxRestartCount) TripCount++;
-                     //if(AlarmFlag3 & TripBits) TripCount = MaxRestartCount;
+                     if((DigitalInputFlag1 & TripBits) || EmergencyStop || SystemFlag.bit.VCESAT) TripCount = MaxRestartCount;
                      systemRunningTimer = 0;
                      restartTimer = RestartDelay;
                      SystemFlag.bit.TRIPFAULT = TRUE;
-                     unitOncmd = FALSE;
                      if(TripCount == MaxRestartCount) SystemFlag.bit.LATCHFAULT = TRUE;
+                     chkIr1.maxTimer = 0;
+                     chkIr2.maxTimer = 0;
+                     chkIr3.maxTimer = 0;
                  }
+       }
+
+     tempiFlag = DigitalInputFlag1;
+
+     if (DI1timer == DI_DELAY)   tempiFlag |= BIT00;
+     else if (DI1timer == 0)     tempiFlag &= BITC0;
+     if (DI2timer == DI_DELAY)   tempiFlag |= BIT01;
+     else if (DI2timer == 0)     tempiFlag &= BITC1;
+     if (DI3timer == DI_DELAY)   tempiFlag |= BIT02;
+     else if (DI3timer == 0)     tempiFlag &= BITC2;
+     if (DI4timer == DI_DELAY)   tempiFlag |= BIT03;
+     else if (DI4timer == 0)     tempiFlag &= BITC3;
+     if (DI5timer == DI_DELAY)   tempiFlag |= BIT04;
+     else if (DI5timer == 0)     tempiFlag &= BITC4;
+     if (DI6timer == DI_DELAY)   tempiFlag |= BIT05;
+     else if (DI6timer == 0)     tempiFlag &= BITC5;
+     if (DI7timer == DI_DELAY)   tempiFlag |= BIT06;
+     else if (DI7timer == 0)     tempiFlag &= BITC6;
+     if (DI8timer == DI_DELAY)   tempiFlag |= BIT07;
+     else if (DI8timer == 0)     tempiFlag &= BITC7;
+     if (DI9timer == DI_DELAY)   tempiFlag |= BIT08;
+     else if (DI9timer == 0)     tempiFlag &= BITC8;
+     if (DI10timer == DI_DELAY)   tempiFlag |= BIT09;
+     else if (DI10timer == 0)     tempiFlag &= BITC9;
+
+     DigitalInputFlag1 = tempiFlag;
+
+     if(DigitalInputFlag1 & DI_UNITON) unitOnCommand = FALSE;
+     else  unitOnCommand = TRUE;
+
+     if(DigitalInputFlag1 & DI_OUTMCB) UPSFlag.bit.OUTMCBOFF = TRUE;
+     else  UPSFlag.bit.OUTMCBOFF = FALSE;
+
+    if(DigitalInputFlag1 & DI_BYPMCB) UPSFlag.bit.BYPMCBOFF = TRUE;
+     else UPSFlag.bit.BYPMCBOFF = FALSE;
+
+
+     if(DigitalInputFlag1 & DI_MANUALBYP) SystemFlag.bit.MANUALBYP = TRUE;
+     else SystemFlag.bit.MANUALBYP = FALSE;
+
+     if(DigitalInputFlag1 & DI_EPO) EmergencyStop = 1; //Latch fault
+
+     if(DigitalInputFlag1 & DI_MAINSFAIL) { mainsFailTimer = MainsOKDelay; chkdcLink.stat.bit.ARL = FALSE; }
+     else
+         {
+             if(mainsFailTimer == 0) chkdcLink.stat.bit.ARL = TRUE ;
          }
 
-     if (SystemFlag.bit.TRIPFAULT)
-     {
-         SystemFlag.bit.RECTON = FALSE;
-         DISABLE_PWM();
-         pwmEnabled = FALSE;
-         reason= 2;
-         return;
-     }
+     if((DigitalInputFlag1 & DI_RESET)==0)
+             {
+                 RESET_FAULTS();
+             }
 
+     UPSFlag.bit.POWERINGUP = SystemFlag.bit.POWERINGUP;
+     UPSFlag.bit.INVRTRDISABL = SystemFlag.bit.INVRTRDISABL;
+     UPSFlag.bit.LOADONBAT = SystemFlag.bit.LOADONBAT;
+     UPSFlag.bit.LOADONBYP = SystemFlag.bit.LOADONBYP;
+     UPSFlag.bit.LOADONINV = SystemFlag.bit.LOADONINV;
+     UPSFlag.bit.MANUALBYP = SystemFlag.bit.MANUALBYP;
+     //UPSFlag.bit.INVFAILURE = SystemFlag.bit.INVFAILURE;
 
-  //   AlarmFlag4 = SysOkFlag.all;
- }
+     UPSFlag.bit.NOTSYNCED = SystemFlag.bit.NOTSYNCED;
 
-N16 NewPress = 1;
-N16 oldBattFlag = 1;
-void UpdateDigitalIO(void)
-{
-    N16 tempiFlag = 0;
+     if(!UPSFlag.bit.INVOK && LimitFlag.bit.INVRTROK) xfr2InvTimer = xfrToInverterDelay;
+     UPSFlag.bit.INVOK = LimitFlag.bit.INVRTROK;
+     UPSFlag.bit.SOFTSTART = SystemFlag.bit.SOFTSTART;
+     UPSFlag.bit.BYPASSOK = LimitFlag.bit.BYPASSOK;
+     UPSFlag.bit.TRIPFAULT = SystemFlag.bit.TRIPFAULT;
+     UPSFlag.bit.BITSVALID = TRUE;
 
-    tempiFlag = DigitalInputFlag1;
+    updateBit(DCOV_Inst_Delay,DCOVTimer,  LimitFlag.bit.DCLINKHIGH);
 
-    if (DI1timer == DI1DELAY)   tempiFlag |= BIT00;
-    else if (DI1timer == 0)     tempiFlag &= BITC0;
-    if (DI2timer == DI2DELAY)   tempiFlag |= BIT01;
-    else if (DI2timer == 0)     tempiFlag &= BITC1;
+    if(Master) UPSFlag.bit.MASTER = TRUE;
+     else UPSFlag.bit.MASTER = FALSE;
 
-    if (DI3timer == DI3DELAY)   tempiFlag |= BIT02;
-    if((cfgAutoResetFlag & BIT02) && (DI3timer == 0)) tempiFlag &= BITC2;
-    if (DI4timer == DI4DELAY)   tempiFlag |= BIT03;
-    else if ((cfgAutoResetFlag & BIT03) && (DI4timer == 0)) tempiFlag &= BITC3;
-    if (DI5timer == DI5DELAY)   tempiFlag |= BIT04;
-    else if ((cfgAutoResetFlag & BIT04) && (DI5timer == 0))     tempiFlag &= BITC4;
-    if (DI6timer == DI6DELAY)   tempiFlag |= BIT05;
-    else if ((cfgAutoResetFlag & BIT05) && (DI6timer == 0))     tempiFlag &= BITC5;
-    if (DI7timer == DI7DELAY)   tempiFlag |= BIT06;
-    else if ((cfgAutoResetFlag & BIT06) && (DI7timer == 0))     tempiFlag &= BITC6;
-    if (DI8timer == DI8DELAY)   tempiFlag |= BIT07;
-    else if ((cfgAutoResetFlag & BIT07) && (DI8timer == 0))     tempiFlag &= BITC7;
-    if (DI9timer == DI9DELAY)   tempiFlag |= BIT08;
-    else if ((cfgAutoResetFlag & BIT08) && (DI9timer == 0))     tempiFlag &= BITC8;
-    if (DI10timer == DI10DELAY) tempiFlag |= BIT09;
-    else if ((cfgAutoResetFlag & BIT09) && (DI10timer == 0))    tempiFlag &= BITC9;
+     SystemFlag.bit.BITSVALID = TRUE;
+     AlarmFlag1= SystemFlag.all;
 
-    if (DI11timer == DI11DELAY) tempiFlag |= BIT10;
-    else if ((cfgAutoResetFlag & BIT10) && (DI11timer == 0))    tempiFlag &= BITC10;
-    if (DI12timer == DI12DELAY) tempiFlag |= BIT11;
-    else if ((cfgAutoResetFlag & BIT11) && (DI12timer == 0))    tempiFlag &= BITC11;
+     LimitFlag.bit.BITSVALID = TRUE;
+     AlarmFlag2= LimitFlag.all;
 
-    DigitalInputFlag1 = tempiFlag;
+     LimitFlagInv.bit.BITSVALID = TRUE;
+     AlarmFlag3 = LimitFlagInv.all;
 
+     flag1 = SysOkFlag.all & 0xff00;
+     AlarmFlag4 = flag1 | (DigitalInputFlag1 & 0xff);
+     AlarmFlag5 = PairStatusFlag.all;
 
-if(DI_ModeSelect)
-{
-    if(DigitalInputFlag1 & DI_AUTO) ManualModeSelect = FALSE;
-    else ManualModeSelect = TRUE;
-
-    if(DigitalInputFlag1 & DI_FLOAT) ForcedFloat = TRUE;
-    else ForcedFloat = FALSE;
-    if(DigitalInputFlag1 & DI_BOOST) ForcedBoost = TRUE;
-    else ForcedBoost = FALSE;
-    if(DigitalInputFlag1 & DI_BT) ForcedBatTest = TRUE;
-    else ForcedBatTest = FALSE;
-    if(DigitalInputFlag1 & DI_EQ) ForcedEqualize = TRUE;
-    else ForcedEqualize = FALSE;
-}
-
-    if(DigitalInputFlag1 & DI_UNITON) unitOncmd = TRUE;
-    else unitOncmd = FALSE;
-
-    if((DigitalInputFlag1 & DI_RESET) && NewPress)
-        {
-            RESET_ALL();
-            NewPress = FALSE;
-        }
-
-    if((DigitalInputFlag1 & DI_RESET)==0) NewPress = TRUE;
-
-    if(ExtRefEnable==1)
-    {
-        if(DigitalInputFlag1 & DI_CPCC)
-        {
-            SystemFlag.bit.CCMODE = TRUE;
-            SystemFlag.bit.CVMODE = FALSE;
-        }
-        else
-        {
-            SystemFlag.bit.CCMODE = FALSE;
-            SystemFlag.bit.CVMODE = TRUE;
-
-        }
-    }
-
-    if(ManualModeSelect)
-    {
-        if(BattFlag.all ^ oldBattFlag)
-            updateRAMvalues(0);
-
-        oldBattFlag = BattFlag.all;
-    }
-
-
-
-}
-
-void updateRelays(void)
-{
-    // Common Controller v2: RelayFlag bit n -> RLY_(n+1) (board_pin_map.h)
-    if(RelayFlag & 0x0001)    GPIO_WritePin(RLY1_GPIO, 1);
-    else                    GPIO_WritePin(RLY1_GPIO, 0);
-    if(RelayFlag & 0x0002)    GPIO_WritePin(RLY2_GPIO, 1);
-    else                    GPIO_WritePin(RLY2_GPIO, 0);
-    if(RelayFlag & 0x0004)    GPIO_WritePin(RLY3_GPIO, 1);
-    else                    GPIO_WritePin(RLY3_GPIO, 0);
-    if(RelayFlag & 0x0008)    GPIO_WritePin(RLY4_GPIO, 1);
-    else                    GPIO_WritePin(RLY4_GPIO, 0);
-    if(RelayFlag & 0x0010)    GPIO_WritePin(RLY5_GPIO, 1);
-    else                    GPIO_WritePin(RLY5_GPIO, 0);
-    if(RelayFlag & 0x0020)    GPIO_WritePin(RLY6_GPIO, 1);
-    else                    GPIO_WritePin(RLY6_GPIO, 0);
-    if(RelayFlag & 0x0040)    GPIO_WritePin(RLY7_GPIO, 1);
-    else                    GPIO_WritePin(RLY7_GPIO, 0);
-    if(RelayFlag & 0x0080)    GPIO_WritePin(RLY8_GPIO, 1);
-    else                    GPIO_WritePin(RLY8_GPIO, 0);
-    if(RelayFlag & 0x0100)    GPIO_WritePin(RLY9_GPIO, 1);
-    else                    GPIO_WritePin(RLY9_GPIO, 0);
-    if(RelayFlag & 0x0200)    GPIO_WritePin(RLY10_GPIO, 1);
-    else                    GPIO_WritePin(RLY10_GPIO, 0);
-    if(RelayFlag & 0x0400)    GPIO_WritePin(RLY11_GPIO, 1);
-    else                    GPIO_WritePin(RLY11_GPIO, 0);
-    if(RelayFlag & 0x0800)    GPIO_WritePin(RLY12_GPIO, 1);
-    else                    GPIO_WritePin(RLY12_GPIO, 0);
+     CommStatus.bit.BITSVALID = TRUE;
+     CommStatusFlag = CommStatus.all;
 
 }
 
 
-void    updateEEPROM_8(N16 start_addr)
-{
-    spiWriteBuffer[0] = ArrayParamsI[st_addr+0];
-    spiWriteBuffer[1] = ArrayParamsI[st_addr+1];
-    spiWriteBuffer[2] = ArrayParamsI[st_addr+2];
-    spiWriteBuffer[3] = ArrayParamsI[st_addr+3];
-    spiWriteBuffer[4] = ArrayParamsI[st_addr+4];
-    spiWriteBuffer[5] = ArrayParamsI[st_addr+5];
-    spiWriteBuffer[6] = ArrayParamsI[st_addr+6];
-    spiWriteBuffer[7] = ArrayParamsI[st_addr+7];
-    eeprom_write_words(EP_PARAM_START + ((start_addr - WR_START)<<1), spiWriteBuffer, 8);
-    DELAY_US(10000);
-}
 
-
-N8 toHex(N8 k) {
-	N8 s;
-	s = k;
-	return ((s % 10) | ((s / 10) << 4));
-}
-
-float Average32(LPF32 *x, float val)
-    {
-        N16 c=0;
-        x->larray[x->lptr] = val;
-        x->lptr++;
-        x->lptr &= 0x1f;
-        x->lsum = 0;
-        for(c=0;c<32;c++)
-        x->lsum += x->larray[c];
-        x->y =  (x->lsum /32);
-        return(x->y);
-    }
-
-float Average8(LPF32 *x, float val)
-    {
-        N16 c=0;
-        x->larray[x->lptr] = val;
-        x->lptr++;
-        x->lptr &= 0x7;
-        x->lsum = 0;
-        for(c=0;c<8;c++)
-        x->lsum += x->larray[c];
-        x->y =  (x->lsum * 0.125);
-        return(x->y);
-    }
-
-
-#define GET_RMS(x)  \
-        tempVar = x.savedSum / rms_samplecount; \
-        x.RMS = sqrt(tempVar)
-
-int  FinMax3(int a,int b, int c)
+float32_t  FinMax3(float32_t a,float32_t b, float32_t c)
     {
         if((a>b) && (a>c)) return(a);
-        if((b>a) && (b>c)) return(b);
+        if(b>c) return(b);
         return(c);
     }
 
-#define UPDATE_QRMS_F(x,y,z)  z = sqrt(x.savedSum/qrtrCycle)*y
-#define UPDATE_RMS_F(x,y,z)  z = sqrt(x.savedSum/rms_samplecount)*y
+float32_t Average32(LPF32 *x, float32_t val)
+{
+    N16 c=0;
+    x->larray[x->lptr] = val;
+    x->lptr++;
+    x->lptr &= 0x1f;
+    x->lsum = 0;
+    for(c=0;c<32;c++)
+    x->lsum += x->larray[c];
+    x->y = (x->lsum/32);
+    return(x->y);
+}
+
+//#define DUMMYVALS
+
+#define UPDATE_RMS_F(x,y,z)  x.RMS = sqrt(x.savedSum/rms_samplecount); \
+                              z = x.RMS*y
 #define UPDATE_KW_F(x,z)  z = (x.savedSum/rms_samplecount)*.001
 #define SCALEF(x,y,z)  z = x*y
 #define scaleKVA(v,i,k) k = v*i*.001
 
+float rawval1 = 0,rawval2 = 0,rawval3 = 0;
+
 #define SCALE_RMSVAL_FLT(meter, sf,flt,v)   \
-        meter.RMS = sqrt(meter.savedSum/rms_samplecount); \
-        rawval1 = meter.RMS * sf; \
-        v = Average32(&flt, rawval1)
+        meter.RMS = sqrt(meter.savedSum/rms_samplecount)*sf; \
+        v = Average32(&flt, meter.RMS)
 
 #define SCALE_DCVAL_FLT(lpf, sf,flt,v)   \
-        rawval1 = lpf*sf; \
+        rawval1 = lpf.y*sf; \
         v = Average32(&flt, rawval1)
-
-#define SCALE_DCVAL_FLT8(lpf, sf,flt,v)   \
-        rawval1 = lpf*sf; \
-        v = Average8(&flt, rawval1)
-
-long count_diff  = 0;
 
 void update_rmsmeters(void)
 {
-            float32_t   rawval1 = 0;
-            int count_60_1 = 0;
-            int manualBalCount = 0;
+    SCALE_RMSVAL_FLT(volt_meter_R,VinvRSF,lpf32_vinvr,VinvR);
+    SCALE_RMSVAL_FLT(volt_meter_Y,VinvYSF,lpf32_vinvy,VinvY);
+    SCALE_RMSVAL_FLT(volt_meter_B,VinvBSF,lpf32_vinvb,VinvB);
 
-            count_60_1 = (int) (periodCount/(6*120));
-            count_60_Sum += count_60_1;
-            count60_count++;
+    SCALE_RMSVAL_FLT(cur_meter_R,IinvRSF,lpf32_iinvr,IinvR);
+    SCALE_RMSVAL_FLT(cur_meter_Y,IinvYSF,lpf32_iinvy,IinvY);
+    SCALE_RMSVAL_FLT(cur_meter_B,IinvBSF,lpf32_iinvb,IinvB);
 
-#define ECAP_CLK_HZ  150000000.0f      // eCAP timebase = SYSCLK; confirm on your part
+    SCALE_RMSVAL_FLT(vout_meter_R,VoutRSF,lpf32_voutr,VoutR);
+    SCALE_RMSVAL_FLT(vout_meter_Y,VoutYSF,lpf32_vouty,VoutY);
+    SCALE_RMSVAL_FLT(vout_meter_B,VoutBSF,lpf32_voutb,VoutB);
 
-            if(periodCount<100000L) MainsFrequency = 0;
-            else
-            {
-                MainsFrequency = ECAP_CLK_HZ / (float)periodCount;
-            }
+    SCALE_RMSVAL_FLT(iout_meter_R,IoutRSF,lpf32_ioutr,IoutR);
+    SCALE_RMSVAL_FLT(iout_meter_Y,IoutYSF,lpf32_iouty,IoutY);
+    SCALE_RMSVAL_FLT(iout_meter_B,IoutBSF,lpf32_ioutb,IoutB);
 
-            if(count60_count >=32)
-            {
-                count_60 = count_60_Sum >> 5;
-                count_60_Sum = 0;
-                count60_count = 0;
-                count_30 = count_60 >> 1;
-                count30SP = count_30;// - PulseWidth;
+    SCALE_RMSVAL_FLT(vll_meter_R,VoutRSF,lpf32_vllr,VoutRY);
+    SCALE_RMSVAL_FLT(vll_meter_Y,VoutYSF,lpf32_vlly,VoutYB);
+    SCALE_RMSVAL_FLT(vll_meter_B,VoutBSF,lpf32_vllb,VoutBR);
 
-            }
+    SCALE_RMSVAL_FLT(vbyp_meter_R,VbypRSF,lpf32_vbypr,VbypR);
+    SCALE_RMSVAL_FLT(vbyp_meter_Y,VbypYSF,lpf32_vbypy,VbypY);
+    SCALE_RMSVAL_FLT(vbyp_meter_B,VbypBSF,lpf32_vbypb,VbypB);
 
-       if(ManualBalancing)
-       {
-           // Bridge2AngleAdjust (deg, bipolar): +ve delays bridge 2,
-           // -ve advances it; SP1+SP2 stays 60 deg
-           manualBalCount = (int) (Bridge2AngleAdjust * count_30 / 30.0);
-           count30_SP1 = count_30 + manualBalCount;
-           count30_SP2 = count_30 - manualBalCount;
-       }
-       else
-       {
-        if(BalancingDirection)
-        {
-            count30_SP1 = count_30 + Bridge2LagCount - Bridge2LeadCount;
-            count30_SP2 = count_30 - Bridge2LagCount + Bridge2LeadCount;
-        }
-        else
-        {
-            count30_SP1 = count_30 - Bridge2LagCount + Bridge2LeadCount;
-            count30_SP2 = count_30 + Bridge2LagCount - Bridge2LeadCount;
-        }
-            }
+    SCALE_RMSVAL_FLT(vllb_meter_R,VbypRSF,lpf32_vbypry,VbypRY);
+    SCALE_RMSVAL_FLT(vllb_meter_Y,VbypYSF,lpf32_vbypyb,VbypYB);
+    SCALE_RMSVAL_FLT(vllb_meter_B,VbypBSF,lpf32_vbypbr,VbypBR);
 
-            if(rms_samplecount >MinPoints)
-            {
-                SCALE_RMSVAL_FLT(volt_meter_R,VinpRSF,lpf32_vr,VinpR);
-                SCALE_RMSVAL_FLT(volt_meter_Y,VinpYSF,lpf32_vy,VinpY);
-                SCALE_RMSVAL_FLT(volt_meter_B,VinpBSF,lpf32_vb,VinpB);
+    UPDATE_KW_F(kw_meter_R, kW_Rph);
+    UPDATE_KW_F(kw_meter_Y, kW_Yph);
+    UPDATE_KW_F(kw_meter_B, kW_Bph);
 
-                SCALE_RMSVAL_FLT(vll_meter_R,VinpRSF,lpf32_vry,VinpRY);
-                SCALE_RMSVAL_FLT(vll_meter_Y,VinpYSF,lpf32_vyb,VinpYB);
-                SCALE_RMSVAL_FLT(vll_meter_B,VinpBSF,lpf32_vbr,VinpBR);
-
-                SCALE_RMSVAL_FLT(cur_meter_R,IinpRSF,lpf32_ir,IinpR);
-                SCALE_RMSVAL_FLT(cur_meter_Y,IinpYSF,lpf32_iy,IinpY);
-                SCALE_RMSVAL_FLT(cur_meter_B,IinpBSF,lpf32_ib,IinpB);
+//KVA Calculation:
+    scaleKVA(VoutR, IoutR, kVA_Rph);
+    scaleKVA(VoutY, IoutY, kVA_Yph);
+    scaleKVA(VoutB, IoutB, kVA_Bph);
 
 
-                //vdcRipple_meter.RMS = sqrt(vdcRipple_meter.savedSum/rms_samplecount);
-                //VdcRipple = vdcRipple_meter.RMS * VdcSF;
+    //POWERFACTOR SCALING:
+    if (kW_Rph >kVA_Rph) kW_Rph = kVA_Rph;
+    if (kW_Yph >kVA_Yph) kW_Yph = kVA_Yph;
+    if (kW_Bph >kVA_Bph) kW_Bph = kVA_Bph;
 
-                SCALE_RMSVAL_FLT(vdcRipple_meter,VdcSF,lpf32_vripple,VdcRipple);
+    powerfactorR = kW_Rph/ kVA_Rph;
+    powerfactorY = kW_Yph/ kVA_Yph;
+    powerfactorB = kW_Bph/ kVA_Bph;
 
-                if(VinpRY<MinVoltage) VinpRY = 0;
-                if(VinpYB<MinVoltage) VinpYB = 0;
-                if(VinpBR<MinVoltage) VinpBR = 0;
+    kVA_Total = kVA_Rph + kVA_Yph + kVA_Bph;
+    kW_Total = kW_Rph + kW_Yph + kW_Bph;
 
-                if(IinpR<MinCurrent) IinpR = 0;
-                if(IinpY<MinCurrent) IinpY = 0;
-                if(IinpB<MinCurrent) IinpB = 0;
+    SCALEF(lpf_dclink.y,DcLinkVoltageSF, DcLinkVoltage);
 
-                UPDATE_KW_F(kw_meter_R, kW_Rph);
-                UPDATE_KW_F(kw_meter_Y, kW_Yph);
-                UPDATE_KW_F(kw_meter_B, kW_Bph);
-
-            //KVA Calculation:
-            scaleKVA(VinpR, IinpR, kVA_Rph);
-            scaleKVA(VinpY, IinpY, kVA_Yph);
-            scaleKVA(VinpB, IinpB, kVA_Bph);
+    SCALEF(lpf_vbat.y,VbatSF, Vbat);
+    SCALEF(lpf_ibat.y,IbatSF, Ibat);
+    SCALEF(lpf_temp1.y,Temp1SF, Temp1);
+    SCALEF(lpf_temp2.y,Temp2SF, Temp2);
 
 
-        //POWERFACTOR SCALING:
-            if (kVA_Rph<kW_Rph) kVA_Rph = kW_Rph;
-            if (kVA_Yph<kW_Yph) kVA_Yph = kW_Yph;
-            if (kVA_Bph<kW_Bph) kVA_Bph = kW_Bph;
-            if(kVA_Rph > 2.0) powerfactorR = kW_Rph/ kVA_Rph;
-            else powerfactorR = 1.0;
-            if(kVA_Yph > 2.0) powerfactorY = kW_Yph/ kVA_Yph;
-            else powerfactorY = 1.0;
-            if(kVA_Bph > 2.0) powerfactorB = kW_Bph/ kVA_Bph;
-            else powerfactorB = 1.0;
-
-            kVA_Total = kVA_Rph + kVA_Yph + kVA_Bph;
-            kW_Total = kW_Rph + kW_Yph + kW_Bph;
+    GridFrequency = OMEGA_FACTOR * pllBypass.omega;
+    InvFrequency = OMEGA_FACTOR * omega_inv;
 
 
-        } //min points
+    rms_update_flag = FALSE;
 
-        SCALE_DCVAL_FLT(lpf_vbat.y,VbatSF, lpf32_vbat, Vbat);
-        SCALE_DCVAL_FLT(ibatFbk,IbatSF, lpf32_ibat, Ibat);
-        SCALE_DCVAL_FLT(lpf_vload.y,VloadSF, lpf32_vload, LoadVoltage);
+    Inv_vol_de_ref = vcontrol.vol.pid_de.term.Ref;
+    Inv_vol_de_fback = vcontrol.vol.lpf_de.y;
+    Inv_vol_de_pidout  = vcontrol.vol.pid_de.term.Out;
+    Inv_vol_qe_ref = vcontrol.vol.pid_qe.term.Ref;
+    Inv_vol_qe_fback = vcontrol.vol.lpf_qe.y;
+    Inv_vol_qe_pidout  = vcontrol.vol.pid_qe.term.Out;
 
-        SCALE_DCVAL_FLT(vdcFbk,VdcSF, lpf32_vdc, Vdc);
-        SCALE_DCVAL_FLT(idc1Fbk,Idc1SF, lpf32_idc1, Idc1);
-        SCALE_DCVAL_FLT(idc2Fbk,Idc2SF, lpf32_idc2, Idc2);
-        // Bridge currents can't be negative: offset residue below 0 A is
-        // shown as 0 (display / alarms only; control uses idc1Fbk/idc2Fbk)
-        if(Idc1 < 0) Idc1 = 0;
-        if(Idc2 < 0) Idc2 = 0;
+    current_de_ref =  cur.pi_de.Ref;
+    current_qe_ref =  cur.pi_qe.Ref;
+    current_de_fback =  cur.pi_de.Fbk;
+    current_qe_fback =  cur.pi_qe.Fbk;
+    current_de_pidout =  cur.pi_de.Out;
+    current_qe_pidout =  cur.pi_qe.Out;
 
-        //Average8
-        if(CurrentSensingMode) IdcTotal = Idc1 + Idc2;
-        else IdcTotal = Idc1;
+    Cur_deMax =  cur.pi_de.Umax;
+    Cur_deMin =  cur.pi_de.Umin;
+    Cur_qeMax =  cur.pi_qe.Umax;
 
-        if(IdcTotal>Ibat) LoadCurrent  = IdcTotal - Ibat;
+    cur_kp = cur.pi_de.Kp;
+    cur_ki = cur.pi_de.Ki;
 
-        SCALEF(lpf_temp1.y,Temp1SF, BattTemp);
-        SCALEF(lpf_temp2.y,Temp2SF, Temp2);
-        SCALEF(lpf_temp3.y,Temp3SF, Temp3);     // ambient, display only
-
-//        MainsFrequency =  OMEGAFACTOR * pllGrid.omega;
-//        if((MainsFrequency >= 47) && (MainsFrequency <= 62)) SysOkFlag.bit.SYNCOK = TRUE;
-//        else SysOkFlag.bit.SYNCOK  = FALSE;
-
-        vdc_ref        = pid_vdc.Ref;
-        vdc_fback      = pid_vdc.Fbk;
-        vdc_pidout     = pid_vdc.Out;
-
-        idc_ref        = pid_idc.Ref;
-        idc_fback      = pid_idc.Fbk;
-        idc_pidout     = pid_idc.Out;
-
-        ibat_ref       = pid_ibat.Ref;
-        ibat_fback     = pid_ibat.Fbk;
-        ibat_pidout    = pid_ibat.Out;
-
-        if(ExtRefEnable==1)
-           {
-               if(SystemFlag.bit.CCMODE)
-               {
-                   fact1 = extVref * 1.5;
-                   if(fact1> 0.99) fact1 = 0.99;
-                   ExtIbatRef = MinIbatRef * FloatIbatRef * 0.01 + (100 - MinIbatRef) * fact1 * FloatIbatRef * 0.01;
-                   ExtVdcRef = FloatVRef;
-               }
-               else //CV MODE
-               {
-                   fact1 = extVref * 1.5;
-                   if(fact1> 0.99) fact1 = 0.99;
-                   ExtVdcRef = MinVdcRef * FloatVRef * 0.01 + (100 - MinVdcRef) * fact1 * FloatVRef * 0.01;
-                   ExtIbatRef = FloatIbatRef;
-               }
-           }
-        else if(ExtRefEnable==2)
-        {
-            fact1 = extIbatref * 1.5;
-            if(fact1> 0.99) fact1 = 0.99;
-            ExtIbatRef = MinIbatRef * FloatIbatRef * 0.01 + (100 - MinIbatRef) * fact1 * FloatIbatRef * 0.01;
-
-            fact1 = extVref * 1.5;
-            if(fact1> 0.99) fact1 = 0.99;
-            ExtVdcRef = MinVdcRef * FloatVRef * 0.01 + (100 - MinVdcRef) * fact1 * FloatVRef * 0.01;
-        }
+    IoutMax = FinMax3(IinvR, IinvR, IinvR);
 }
 
-void        updateRAMvalues(N16 adr)
-{
 
-   switch(adr)
+static N16 NUMBITS[] = {    0xffff, 0xfffe, 0xfffc, 0xfff8, 0xfff0, 0xffe0, 0xffc0,0xff80,
+                                0xff00, 0xfe00, 0xfc00, 0xf800, 0xf000, 0xe000, 0xc000,0x08000  };
+
+N8  findBit(N8 start, N16 flag)
     {
-    case 0:
-        if(DeviceID == 1)
-        {
-            DataAddr = DATAADDR_1;
-            EventAddr = EVENTADDR_1;
-            SetAddr = SETADDR_1;
-            PidAddr1 = DATAADDR_2;
-            PidAddr2 = DATAADDR_2 + 1;
-        }
-        else
-        {
-            DataAddr = DATAADDR_2;
-            EventAddr = EVENTADDR_2;
-            SetAddr = SETADDR_2;
-            PidAddr1 = DATAADDR_1;
-            PidAddr2 = DATAADDR_1 + 1;
-        }
+     N8 msgcount;
+     N16 bitptr;
 
-         pid_ibat.Kp = ibat_kp;
-         pid_ibat.Ki = ibat_ki;
-         pid_idc.Kp = idc_kp;
-         pid_idc.Ki = idc_ki;
-         pid_vdc.Kp = vdc_kp;
-         pid_vdc.Ki = vdc_ki;
+     bitptr = flag & NUMBITS[start];
 
-         lpf_vdc.T = Lpf_T_Vdc;
-         lpf_idc1.T = Lpf_T_Idc;
-         lpf_idc2.T = Lpf_T_Idc;
-         lpf_ibat.T = Lpf_T_Idc;
+     if(bitptr == 0) return(0);
 
-         sfFactor = Idc2SF/ Idc1SF;
+     bitptr = 1L << start;
 
-         Vdc_Ref = VdcRef /VdcSF;
-         Idc_Ref = IdcRef /Idc1SF;
-         Idc1_2_Ref = Idc_Ref * 0.60;
+        msgcount = 0;
 
-         Ibat_Ref = IbatRef /IbatSF;
-         mainsFailLevel = VacLL/VinpRSF;
-         ocLevel = IacHL/IinpRSF;
-         Idc1_2_Ref = Idc_Ref * 0.6;
-         break;
-
-    case 120:
-    case 123:
-    case 169:
-        Vdc_Ref = VdcRef /VdcSF;
-        ReferenceChangedFlag = TRUE;
-        break;
-
-    case 121:
-    case 170:
-    case 171:
-        Idc_Ref = IdcRef /Idc1SF;
-        Idc1_2_Ref = Idc_Ref * 0.60;
-        sfFactor = Idc2SF/ Idc1SF;
-        ReferenceChangedFlag = TRUE;
-        break;
-    case 122:
-        Ibat_Ref = IbatRef /IbatSF;;
-        break;
-    case 184://LPF IDC
-//        lpf_idc1.T = LpfT_Idc;
-//        lpf_idc2.T = LpfT_Idc;
-        break;
-    case 185:
-        pid_vdc.Kp = vdc_kp;
-        break;
-    case 186:
-        pid_vdc.Ki = vdc_ki;
-        break;
-    case 187:
-        pid_idc.Kp = idc_kp;
-        break;
-    case 188:
-        pid_idc.Ki = idc_ki;
-        break;
-    case 189:
-        pid_ibat.Kp = ibat_kp;
-        break;
-    case 190:
-        pid_ibat.Ki = ibat_ki;
-        break;
-    case 228:
-        lpf_ifback.T = Lpf_T_Iref;
-        lpf_pid.T = Lpf_T_Iref;
-        break;
-    case 229:
-        lpf_vdc.T = Lpf_T_Vdc;
-    case 230:
-        lpf_idc1.T = Lpf_T_Idc;
-        lpf_idc2.T = Lpf_T_Idc;
-        lpf_ibat.T = Lpf_T_Idc;
-        break;
-
+    while (!(flag & bitptr))
+    {
+      bitptr <<= 1;
     }
 
-    return;
+    do
+        {
+              bitptr >>= 1;
+              ++msgcount;
+        }
+            while(bitptr);
+
+        return(msgcount--);
 }
-
-
-void storeEvents(void) {
-    N16 *byteptr;
-    N16 eventAddr = 0;
-    Uint16 _ccount = 0;
-
-    if (msgPending && ((milliseconds- last_stored_time) > 10 ))
-    {
-        RecordNumber++;
-        if(RecordNumber > MAXPACKETS) RecordNumber = 0;
-#if RTC_PRESENT
-        WriteRecordPointer(RecordNumber);   // record pointer was kept in the RTC SRAM
-#endif
-        //store
-
-        eventAddr = (RecordNumber << 6) + LOGSTART;
-        byteptr = (N16 *) &EventTX;
-
-        for(_ccount=0;_ccount < RECSIZE;_ccount++)
-        spiWriteBuffer[_ccount] = *(byteptr + _ccount);
-
-        eeprom_write_words(eventAddr, spiWriteBuffer, RECSIZE);
-        msgPending = FALSE;
-        last_stored_time = milliseconds;
-      //  recordWriteTimer = SEC1;
-    }
-
-}
-
-
-void EventLogging(void) {
-
-    N16  j, ev = 0;
-    N16 Event = 0;
-
-    Event = 0;
-
-    ev = AlarmFlag1 & EventMask1;
-    j = ev & (~AlarmFlag1_old);
-    if (j) Event = 1;
-    AlarmFlag1_old = ev;
-
-    ev = AlarmFlag2 & EventMask2;
-    j = ev & (~AlarmFlag2_old);
-    if (j) Event = 1;
-    AlarmFlag2_old = ev;
-
-    ev = AlarmFlag3 & EventMask3;
-    j = ev & (~AlarmFlag3_old);
-    if (j) Event = 1;
-    AlarmFlag3_old = ev;
-
-
-
-    if (Event && (eventCount < 3))
-    {
-        Events[eventCount].type = 0x1973;
-        Events[eventCount].alarm1 = AlarmFlag1 & MsgMask1;
-        Events[eventCount].alarm2 = AlarmFlag2 & MsgMask2;
-        Events[eventCount].alarm3 = AlarmFlag3 & MsgMask3;
-        Events[eventCount].alarm4 = AlarmFlag5 ;
-
-        Events[eventCount].eVinpR = VinpRY;
-        Events[eventCount].eVinpY = VinpYB;
-        Events[eventCount].eVinpB = VinpBR;
-        Events[eventCount].eIinpR = IinpR;
-        Events[eventCount].eIinpY = IinpY;
-        Events[eventCount].eIinpB = IinpB;
-
-        Events[eventCount].eVdc = Vdc;
-        Events[eventCount].eIdc = Idc1;
-        Events[eventCount].eVbat = Vbat;
-        Events[eventCount].eIbat = Ibat;
-        Events[eventCount].eVload = LoadVoltage;
-        Events[eventCount].eIload = LoadCurrent;
-        Events[eventCount].eIbrdg1 = Idc1;
-        Events[eventCount].eIbrdg1 = Idc2;
-        Events[eventCount].kVA_R = kVA_Rph;
-        Events[eventCount].kVA_Y = kVA_Yph;
-        Events[eventCount].kVA_B = kVA_Bph;
-        Events[eventCount].kW_R = kW_Rph;
-        Events[eventCount].kW_Y = kW_Yph;
-        Events[eventCount].kW_B = kW_Bph;
-//        Events[eventCount].eKVA = InputkVA;
-//        Events[eventCount].eKW = InputkW;
-//        Events[eventCount].ePF = powerFactor;
-//        Events[eventCount].eFrequency = Frequency;
-
-        eventSerialNumber++;
-        if(eventSerialNumber>= 1000) eventSerialNumber = 0;
-        eventCount++;
-
-    }   //Event Occured
-            if ((msgPending == 0) && eventCount)    //last event transmission complete
-                    {
-                        EventTX = Events[0];
-                        Events[0] = Events[1];
-                        Events[1] = Events[2];
-                        Events[2] = Events[3];
-                        eventCount--;
-                        msgPending = TRUE;
-                    }
-
-}       //function END
 
 
 void delay_ms(N16 n1)
@@ -1162,220 +704,390 @@ void delay_ms(N16 n1)
         while(msDelayCount);
         return;
     }
+/*
+void  SetFactoryDefaults(void) {
+    Uint16 parAddr;
+    Uint16 val, x;
 
-/*enum {
-        F_NOFORCE = 0,
-        F_EQUALIZE,
-        F_BATTEST,
-        F_BOOST,
-        F_FLOAT
-};
-N16 ManualChargerMode = 0;
-*/
+    spiWriteBuffer[0] = MAGIC;
+    spiWriteBuffer[1] = 0;
+    eeprom_write(EP_IDLOC, 2);
+    DELAY_US(10000);
 
-float CalculateVdcRef(float BaseVRef) {
-    float Temp_Delta = 0 ;
-    float Temp_Compensation_V = 0 ;
-    if (Batt_TempComp) {
-        // Temp_Delta (degrees) * Batt_Drop_perDegree (-mV/degree) / 1000 (mV->V)
-        Temp_Delta = Batt_Rated_Temp - BattTemp;
-        Temp_Compensation_V = (Temp_Delta * Batt_Drop_perDegree) / 1000.0;
-        return BaseVRef + Temp_Compensation_V;
-    } else {
-        return BaseVRef;
+    for (x = 0; x < 10; x++) {
+        val = *(defaultSerial + x + x + 0);
+        val <<= 8;
+        val |= *(defaultSerial + x + x + 1);
+        spiWriteBuffer[x ] = val;
+        ArrayParam[SERIAL_START + x] = val;
     }
+
+    eeprom_write(EP_SERIAL, READLEN);
+    DELAY_US(10000);
+
+    for (parAddr = 0; parAddr < NUMWPARAMS; parAddr++)
+        ArrayParamF[parAddr + WR_START] = defaultValues[parAddr].DefaultValue;
+        storeArrayToEEPROM();
 }
-
-// Charger States (Enumerate all 6 distinct phases)
-typedef enum {
-    STATE_IDLE,             // Waiting for a connection or command
-    STATE_FLOAT,            // Normal maintenance charge
-    STATE_BOOST,       // Main charging phase
-    STATE_EQUALIZING,       // High-voltage cleaning phase
-    STATE_DG_MODE,          // Dedicated generator battery maintenance
-    STATE_BATTERY_TEST      // Running a discharge/recharge test
-} ChargerState;
-
-// Current State Tracking
-ChargerState CurrentState = STATE_IDLE;
-
-void SM_FloatBoost(void)
- {
-    if(Auto_SetRefLevels)
+*/
+    void        updateRAMvalues(N16 adr)
     {
-        Vfloat = NumberOfCells * CellFloatLevel;
-        Vboost = NumberOfCells * CellBoostLevel;
-        Veq = NumberOfCells * CellEqualizerLevel;
-        Vdg = NumberOfCells * CellNoChargeLevel;
-        Vtest = Batt_SetLevel;
-        Ibatref = BatteryAH * ChargingLevel * 0.01;
-    }
-    else
-    {
-        Vfloat = FloatVRef;
-        Vboost = BoostVRef;
-        Veq = EqualiseVRef;
-        Vdg = DGModeVRef;
-        Vtest = Batt_SetLevel;
-        Ibatref = FloatIbatRef;
-    }
+        switch(adr)
+        {
+        case 0:
+            cur.pi_de.Kp = cur_kp;
+            cur.pi_qe.Kp = cur_kp;
 
-    if(opMode == modeBOOST) Ibatref = BoostIbatRef;
+            volRef_Id = (RatedVoltage*TrxFactor)/VinvRSF;
+            InvCurHL_Lvl1a = RatedCurrent*InvCurHL_Lvl1/100.0;
+            InvCurHL_Lvl2a = RatedCurrent*InvCurHL_Lvl2/100.0;
+            InvCurHL_Lvl3a = RatedCurrent*InvCurHL_Lvl3/100.0;
 
-    if(ExtRefEnable) {Vfloat = ExtVdcRef; Ibatref = ExtIbatRef; }
+            inverterFailLevel = (InvVoltageLL/VinvRSF)*0.9;
+            bypassFailLevel = (BypVoltageLL/VbypRSF)*0.9;
 
-    if(Auto_BoostEnable) AutoBoostCurLevel = Ibatref * BoostChangeoverLevel * 0.01;
-    else AutoBoostCurLevel = Ibatref;
+            vcontrol.vol.pid_de.param.Kp = inv_kp;
+            vcontrol.vol.pid_qe.param.Kp = inv_kp;
+            vcontrol.vol.pid_de.param.Ki = inv_ki;
+            vcontrol.vol.pid_qe.param.Ki = inv_ki;
+            cur.pi_de.Umax = Cur_deMax;
+            cur.pi_de.Umin = Cur_deMin;
+            cur.pi_qe.Umax = Cur_qeMax;
+            cur.pi_qe.Umin = -Cur_qeMax;
 
-switch (CurrentState)
-    {
-            case STATE_IDLE:
+            if(VacPeakLimit<RatedVoltage)  vacPeakLimit = 1.1 * RatedVoltage;
 
-                VdcRef = 0.0; // Output off
-                IbatRef = 0.0; // Output off
+            vacPeakLimit = 1.414 * VacPeakLimit;
+            dcOV_Inst_Level = DCOV_Inst_Level/DcLinkVoltageSF;
 
-                if(!SystemFlag.bit.POWERINGUP) CurrentState = STATE_FLOAT;
-                break;
+            if((UnitAddress>0) && (UnitAddress<33)) address = UnitAddress;
+            else address = 1;
+           // Master = MasterSet;
+            break;
 
-            case STATE_FLOAT:
-                VdcRef = CalculateVdcRef(Vfloat);
-                IbatRef = Ibatref; // IbatRef is minimal/maintenance current limit
+        case 100:
+            volRef_Id = (RatedVoltage*TrxFactor)/VinvRSF;
+            ReferenceChangedFlag = TRUE;
+            break;
+        case 102:
+            if(Cur_deMin<0.0f) cur.pi_de.Umin = Cur_deMin;
+            break;
+        case 103:
+            cur.pi_de.Umax = Cur_deMax;
+            break;
+        case 104:
+            cur.pi_qe.Umax = Cur_qeMax;
+            cur.pi_qe.Umin = -Cur_qeMax;
+            break;
+        case 101:
+        case 117:
+        case 118:
+        case 119:
+            ReferenceChangedFlag = TRUE;
+            InvCurHL_Lvl1a = RatedCurrent*InvCurHL_Lvl1/100.0;
+            InvCurHL_Lvl2a = RatedCurrent*InvCurHL_Lvl2/100.0;
+            InvCurHL_Lvl3a = RatedCurrent*InvCurHL_Lvl3/100.0;
+            break;
+        case 145:
+             cur_neg.pi_de.Kp = cur_neg_kp;
+             cur_neg.pi_qe.Kp = cur_neg_kp;
+             break;
 
-                // Transition to Boost (Manual or Auto)
-                if (Auto_BoostEnable && (Ibat > AutoBoostCurLevel))
-                {
-                    CurrentState = STATE_BOOST;
-                    BoostTimer = BoostPeriod; // Reset timer on transition
-                    ForcedBoost = false; // Consume manual command
-                }
-                opMode = modeFLOAT;
-                break;
+        case 146:
+             cur_neg.pi_de.Ki = cur_neg_ki;
+             cur_neg.pi_qe.Ki = cur_neg_ki;
+             break;
+        case 148:
+             cur_neg.lpf_de.T = cur_neg_lpf;
+             cur_neg.lpf_qe.T = cur_neg_lpf;
+             break;
+//
+//
+//            {0.01,.5,0.1},  /*  cur_neg_kp 145 */
+//            {0.001,0.5,0.01},  /*  cur_neg_ki 146 */
+//            {-0.5,1.047197551, 0.523598776},  /*  Angle30 147 */
+//            {0.0001,0.1,0.001}, /* cur_neg_lpf  148  */
 
-            case STATE_BOOST:
-                VdcRef = CalculateVdcRef(Vboost);
-                IbatRef = Ibatref; // High current limit
+        case 155:
+            vcontrol.vol.pid_de.param.Kp = inv_kp;
+            vcontrol.vol.pid_qe.param.Kp = inv_kp;
+            vcontrol.vol.pid_de.data.i1 = vcontrol.vol.pid_de.data.i1 * 0.6;
+            vcontrol.vol.pid_qe.data.i1 = vcontrol.vol.pid_qe.data.i1 * 0.6;
+            break;
+        case 156:
+            vcontrol.vol.pid_de.param.Ki = inv_ki;
+            vcontrol.vol.pid_qe.param.Ki = inv_ki;
+            vcontrol.vol.pid_de.data.i1 = vcontrol.vol.pid_de.data.i1 * 0.6;
+            vcontrol.vol.pid_qe.data.i1 = vcontrol.vol.pid_qe.data.i1 * 0.6;
+            break;
+        case 153:
+             cur.pi_de.Kp = cur_kp;
+             cur.pi_qe.Kp = cur_kp;
+             break;
 
-                if (Ibat < (AutoBoostCurLevel - IbatHysteresis))
-                {
-                    CurrentState = STATE_FLOAT;
-                }
-                // Boost Termination Condition 2: Safety Timer Exceeded
-                if (BoostTimer == 0)
-                { // Convert hours to ms
-                    CurrentState = STATE_FLOAT;
-                }
-                opMode = modeBOOST;
-                break;
+        case 154:
+             cur.pi_de.Ki = cur_ki;
+             cur.pi_qe.Ki = cur_ki;
+             break;
         }
 
+        return;
+}
+#define CALARM_PFC_FLAG1    3840
+#define CALARM_PFC_FLAG2    32767
+#define CALARM_PFC_FLAG3    15
+#define CALARM_PFC_FLAG4    0
 
-if(ManualModeSelect)
+#define CALARM_INV_FLAG1    7112
+#define CALARM_INV_FLAG2    2047
+#define CALARM_INV_FLAG3    4681
+#define CALARM_INV_FLAG4    0
+
+N16 BITS[] = {BIT0, BIT1, BIT2, BIT3, BIT4, BIT5, BIT6, BIT7, BIT8, BIT9, BIT10, BIT11, BIT12, BIT13, BIT14, BIT15};
+
+N16 Fault_Bits(void)
+    {
+        N16 Count = 0;
+        N16 i = 0;
+        N16 pfc_flag3_mask = 0;
+
+        pfc_flag3_mask = CALARM_PFC_FLAG3 | (DI_AlarmBits_PFC << 8);
+
+        for(i=0;i<16;i++)
+            if(Pfc_AlarmFlag1 & BITS[i] & CALARM_PFC_FLAG1 ) Count++;
+        for(i=0;i<16;i++)
+            if(Pfc_AlarmFlag2 & BITS[i] & CALARM_PFC_FLAG2) Count++;
+        for(i=0;i<16;i++)
+            if(Pfc_AlarmFlag3 & BITS[i] & pfc_flag3_mask) Count++;
+        for(i=0;i<16;i++)
+            if(Pfc_AlarmFlag4 & BITS[i] & CALARM_PFC_FLAG4) Count++;
+
+        for(i=0;i<16;i++)
+            if(AlarmFlag1 & BITS[i] & CALARM_INV_FLAG1) Count++;
+        for(i=0;i<16;i++)
+            if(AlarmFlag2 & BITS[i] & CALARM_INV_FLAG2) Count++;
+        for(i=0;i<16;i++)
+            if(AlarmFlag3 & BITS[i] & CALARM_INV_FLAG3) Count++;
+        for(i=0;i<16;i++)
+            if(AlarmFlag4 & BITS[i] & (DigitalInputFlag1 & DI_AlarmBits)) Count++;
+
+     return(Count);
+    }
+
+//    INPUT AC FAILURE
+//    DC GROUND FAULT
+//    BATTERY CB OPEN
+//    BYPASS FAILURE
+//    OVERLOAD
+//    COMMON FAULT
+//    UPS ON BATTERY
+//    INVERTER HEALTHY
+//    CHARGER FIALURE
+//    LOAD ON BYPASS
+
+//2016 1791 0x7fff + DI Alarms and DI alarms FF //INV
+//3840 0x7fff 15 + DI alarms  (ff00)  //PFC
+
+
+N16 oldBits = 0;
+void    UpdateRelayFlag(void)
 {
-    BattFlag.all &= 0xfff0; //clearing mode bits
-    opMode = 0;
+    N16 pfc_flag3_mask = 0;
 
-    if(ForcedFloat) { opMode = modeFLOAT;
-                      VdcRef = CalculateVdcRef(Vfloat);
-                      IbatRef = Ibatref;
-                      BattFlag.bit.FLOATMODE = TRUE;
-                    }
-      else if(ForcedBoost) {
-                              if(opMode!=modeBOOST)
-                              {
-                                  opMode = modeBOOST;
-                                  BattFlag.bit.BOOSTMODE = TRUE;
-                                  BoostTimer = BoostPeriod;
-                              }
-                              if (BoostTimer == 0) ForcedBoost = FALSE;
-                              VdcRef = CalculateVdcRef(Vboost);
-                              IbatRef = Ibatref;
+        pfc_flag3_mask = CALARM_PFC_FLAG3 | (DI_AlarmBits_PFC << 8);
+
+        if((Pfc_AlarmFlag1 & 0x800) || (Pfc_AlarmFlag2 & 0x003f)) RelayFlag |= BIT00;
+        else RelayFlag &= BITC0; //INPUT AC FAILURE
+
+        if(Pfc_AlarmFlag3 & 0x8000) RelayFlag |= BIT01; //GROUND FAULT
+        else RelayFlag &= BITC1;
+
+        if(Pfc_AlarmFlag3 & 0x2000) RelayFlag |= BIT02;
+        else RelayFlag &= BITC2; //BAT CB
+
+        if(AlarmFlag2 & 0x003f) RelayFlag |= BIT03;
+        else RelayFlag &= BITC3;
+        if(AlarmFlag1 & 0x1880) RelayFlag |= BIT04; //Overload + active
+        else RelayFlag &= BITC4;
+
+        if( (Pfc_AlarmFlag1 & CALARM_PFC_FLAG1) || (Pfc_AlarmFlag2 & CALARM_PFC_FLAG2) ||
+                (Pfc_AlarmFlag3 & pfc_flag3_mask) || (Pfc_AlarmFlag4 & CALARM_PFC_FLAG4) ||
+                (AlarmFlag1 & CALARM_INV_FLAG1) || (AlarmFlag2 & CALARM_INV_FLAG2) ||
+                                (AlarmFlag3 & CALARM_INV_FLAG3) || (AlarmFlag4 & (DigitalInputFlag1 & DI_AlarmBits) )) { RelayFlag |= BIT05; BuzzerOn = TRUE; }
+         else { RelayFlag &= BITC5;  BuzzerOn = FALSE; }//common
+
+        FaultBits = Fault_Bits();
+        if(FaultBits> oldBits) MuteFlag = FALSE;
+        oldBits = FaultBits;
+
+        if(AlarmFlag1 & 0x1808) BeepDuration = 200;
+        else BeepDuration = 900;
+
+
+        if(AlarmFlag1 & 0x0008) RelayFlag |= BIT06; //load on batt
+        else RelayFlag &= BITC6;
+
+        if(AlarmFlag4 & 0x0800) RelayFlag |= BIT07; //Inverter Healthy
+        else RelayFlag &= BITC7;
+
+        if(Pfc_AlarmFlag1 & 0x2008) RelayFlag |= BIT08; //Charger Failure
+        else RelayFlag  &= BITC8;
+
+        if(AlarmFlag1 & 0x0020) RelayFlag |= BIT09; //load on bypass
+        else RelayFlag &= BITC9;
+
+
+}
+ void UpdateRelays(void)
+    {
+        if(RelayFlag & 0x0001)  GPIO_WritePin(24, 1);
+        else GPIO_WritePin(24, 0);
+        if(RelayFlag & 0x0002)  GPIO_WritePin(25, 1);
+        else GPIO_WritePin(25, 0);
+        if(RelayFlag & 0x0004)  GPIO_WritePin(26, 1);
+        else GPIO_WritePin(26, 0);
+        if(RelayFlag & 0x0008)  GPIO_WritePin(27, 1);
+        else GPIO_WritePin(27, 0);
+
+        if(RelayFlag & 0x0010)  GPIO_WritePin(32, 1);
+        else GPIO_WritePin(32, 0);
+        if(RelayFlag & 0x0020)  GPIO_WritePin(58, 1);
+        else GPIO_WritePin(58, 0);
+        if(RelayFlag & 0x0040)  GPIO_WritePin(22, 1);
+        else GPIO_WritePin(22, 0);
+        if(RelayFlag & 0x0080)  GPIO_WritePin(44, 1);
+        else GPIO_WritePin(44, 0);
+
+        if(RelayFlag & 0x0100)  GPIO_WritePin(61, 1);
+        else GPIO_WritePin(61, 0);
+        if(RelayFlag & 0x0200)  GPIO_WritePin(59, 1);
+        else GPIO_WritePin(59, 0);
+
+    }
+
+
+ void storeEvents(void) {
+     N16 *byteptr;
+     N16 eventAddr = 0;
+     Uint16 _ccount = 0;
+
+     if (msgPending && ((milliseconds- last_stored_time) > 10 ))
+     {
+         RecordNumber++;
+         if(RecordNumber > MAXPACKETS) RecordNumber = 0;
+         WriteRecordPointer();
+         //store
+
+         eventAddr = (RecordNumber << 6) + LOGSTART;
+         byteptr = (N16 *) &EventTX;
+
+         for(_ccount=0;_ccount < RECSIZE;_ccount++)
+         spiWriteBuffer[_ccount] = *(byteptr + _ccount);
+
+         eeprom_write(eventAddr, RECSIZE);
+         msgPending = FALSE;
+         last_stored_time = milliseconds;
+         recordWriteTimer = SEC1;
+     }
+
+ }
+
+ //EventLogging Functions
+ N16 j = 0,Event = 0, AlarmFlag = 0, ev = 0;
+
+ void EventLogging(void)
+ {
+
+#define MSGMASK1 6601  //EventFlag
+#define MSGMASK2 2047 // LimitFlag
+#define MSGMASK3 32767 // LimitFlag
+#define MSGMASK4 125 // LimitFlag
+#define MSGMASK5 4095 // Pair Status
+
+
+     j = 0,Event = 0, AlarmFlag = 0, ev = 0;
+ Event = 0;
+ j= 0;
+
+         AlarmFlag = AlarmFlag1;
+         ev = AlarmFlag & MSGMASK1;
+         j = ev & (~AlarmFlag1_old);
+         if (j) Event = 1;
+         AlarmFlag1_old = ev;
+
+         AlarmFlag = AlarmFlag2;
+         ev = AlarmFlag & MSGMASK2;
+         j = ev & (~AlarmFlag2_old);
+         if (j) Event = 1;
+         AlarmFlag2_old = ev;
+
+         AlarmFlag = AlarmFlag3;
+         ev = AlarmFlag & MSGMASK3;
+         j = ev & (~AlarmFlag3_old);
+         if (j) Event = 1;
+         AlarmFlag3_old = ev;
+
+         AlarmFlag = AlarmFlag4;
+         ev = AlarmFlag & MSGMASK4;
+         j = ev & (~AlarmFlag4_old);
+         if (j) Event = 1;
+         AlarmFlag4_old = ev;
+
+         AlarmFlag = AlarmFlag5;
+         ev = AlarmFlag & MSGMASK5;
+         j = ev & (~AlarmFlag5_old);
+         if (j) Event = 1;
+         AlarmFlag5_old = ev;
+
+         if (Event && (eventCount < 3))
+         {
+             Events[eventCount].type = 0x1973;
+             Events[eventCount].minsec = RTCMinute*256+RTCSecond;
+             Events[eventCount].dthr = RTCDate*256+RTCHour;
+             Events[eventCount].yrmon = RTCYear*256 + RTCMonth;
+             Events[eventCount].alarm1 = AlarmFlag1 & MSGMASK1;
+             Events[eventCount].alarm2 = AlarmFlag2 & MSGMASK2;
+             Events[eventCount].alarm3 = AlarmFlag3 & MSGMASK3;
+             Events[eventCount].alarm4 = AlarmFlag4 & MSGMASK4;
+             Events[eventCount].alarm5 = AlarmFlag5 & MSGMASK5;
+
+                Events[eventCount].eVinvR = (int) (VinvR*10);
+                Events[eventCount].eVinvY = (int) (VinvY*10);
+                Events[eventCount].eVinvB = (int) (VinvB*10) ;
+                Events[eventCount].eVbypR = (int) (VbypR*10) ;
+                Events[eventCount].eVbypR = (int) (VbypY*10) ;
+                Events[eventCount].eVbypR = (int) (VbypB*10) ;
+                Events[eventCount].eIinvR = (int) (IoutR*10) ;
+                Events[eventCount].eIinvY = (int) (IoutY*10) ;
+                Events[eventCount].eIinvB = (int) (IoutB*10) ;
+                Events[eventCount].ekVA_R = (int) (kVA_Rph*10) ;
+                Events[eventCount].ekVA_Y = (int) (kVA_Yph*10) ;
+                Events[eventCount].ekVA_B = (int) (kVA_Bph*10);
+                Events[eventCount].ekW_R =  (int) (kW_Rph*10);
+                Events[eventCount].ekW_Y =  (int) (kW_Yph*10);
+                Events[eventCount].ekW_B =  (int) (kW_Bph*10);
+                Events[eventCount].InvFreq = (int) (InvFrequency*100);
+                Events[eventCount].BypFreq =  (int) (GridFrequency*100);
+                Events[eventCount].eVbat =  (int) (Vbat*10);
+                Events[eventCount].DcLinkV =  (int) (DcLinkVoltage*10);
+                Events[eventCount].eIbat =  (int) (Ibat*10);;
+
+             eventSerialNumber++;
+             eventSerialNumber &= 0xfff;
+             eventCount++;
+         }   //Event Occured
+
+          if ((msgPending == 0) && eventCount)    //last event transmission complete
+                         {
+                             EventTX = Events[0];
+                             Events[0] = Events[1];
+                             Events[1] = Events[2];
+                             Events[2] = Events[3];
+                             eventCount--;
+                             msgPending = TRUE;
                          }
-      else if(ForcedEqualize) {
-                                  if(opMode != modeEQUALIZE) //initial ops
-                                      {
-                                          EqualizeTimer = EqualizerTime;
-                                          opMode = modeEQUALIZE;
-                                          IbatEqRelease = EqualiseIbatRef * 0.05;
-                                          BattFlag.bit.EQUALIZE = TRUE;
-                                      }
-                                  if(Ibat < IbatEqRelease) { if(eqrelTimer<100) eqrelTimer++; }
-                                  else { if(eqrelTimer) eqrelTimer--; }
-                                  if((EqualizeTimer==0) || (eqrelTimer==100))ForcedEqualize = FALSE;
-                                  VdcRef = EqualiseVRef;
-                                  IbatRef = EqualiseIbatRef;
-                              }
 
-  else if(ForcedBatTest) {
-                              if(opMode == modeTEST) //check for exit
-                              {
-                                  if((Vbat<Batt_FailLevel) || (Batt_TestTimer==0)) ForcedBatTest = FALSE;
-                              }
-                              else
-                              {
-                                  opMode = modeTEST;
-                                  BattFlag.bit.TESTMODE = TRUE;
-                                  Batt_TestTimer = Batt_Duration;
-                              }
-                              VdcRef = Batt_SetLevel;
-                         }
-}
+     }       //function END
 
-    else if(DigitalInputFlag1 & DI_DGMODE)
-    {
-        opMode = modeDG;
-        VdcRef = DGModeVRef;
-        BattFlag.bit.DGMODE = TRUE;
-    }
-
-//---------------------------------------------------------------------------------
-
-    BattFlag.bit.FLOATMODE = FALSE;
-    BattFlag.bit.BOOSTMODE = FALSE;
-    BattFlag.bit.DGMODE = FALSE;
-    BattFlag.bit.EQUALIZE = FALSE;
-    BattFlag.bit.TESTMODE = FALSE;
-
-    if(Ibat>1.0)  { BattFlag.bit.CHARGE = TRUE; BattFlag.bit.DISCHARGE = FALSE; }
-    if(Ibat< -1.0)  { BattFlag.bit.CHARGE = FALSE; BattFlag.bit.DISCHARGE = TRUE; }
-    if(opMode == modeFLOAT) BattFlag.bit.FLOATMODE = TRUE;
-    if(opMode == modeBOOST) BattFlag.bit.BOOSTMODE = TRUE;
-    if(opMode == modeEQUALIZE) BattFlag.bit.EQUALIZE = TRUE;
-    if(opMode == modeTEST) BattFlag.bit.TESTMODE = TRUE;
-    if(opMode == modeDG) BattFlag.bit.DGMODE = TRUE;
-
-    if(VdcRef != vdcRef_old)
-    {
-        Vdc_Ref = VdcRef /VdcSF;
-        vdcRef_old = VdcRef;
-        ReferenceChangedFlag = TRUE;
-    }
-
-    if(IbatRef != ibatref_old)
-    {
-        Ibat_Ref = IbatRef /IbatSF;
-        ibatref_old = IbatRef;
-    }
-
-}
-
-void    InitCapture(void)
-{
-
-        ECAP_setEventPrescaler(ECAP1_BASE, 1);
-        ECAP_setCaptureMode(ECAP1_BASE, ECAP_CONTINUOUS_CAPTURE_MODE, ECAP_EVENT_1);
-        ECAP_setEventPolarity(ECAP1_BASE, ECAP_EVENT_1, ECAP_EVNT_RISING_EDGE);
-        ECAP_enableCounterResetOnEvent(ECAP1_BASE, ECAP_EVENT_1);   // optional OFF/ON
-        ECAP_disableCounterResetOnEvent(ECAP1_BASE, ECAP_EVENT_1);  // keep TSCTR free-running
-        ECAP_enableLoadCounter(ECAP1_BASE); // keeps TSCTR running
-        ECAP_enableTimeStampCapture(ECAP1_BASE);
-        ECAP_startCounter(ECAP1_BASE);
-}
-
-
-
-
-
-//----------- NO MORE ----------------
-
-
+ //----------- NO MORE ----------------
 

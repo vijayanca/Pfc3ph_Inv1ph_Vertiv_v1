@@ -18,13 +18,7 @@ typedef struct 	{ float  Ualpha; 			// Input: reference alpha-axis phase voltage
 /*------------------------------------------------------------------------------
 	Space Vector  Generator (SVGEN) Macro Definition
 ------------------------------------------------------------------------------*/
-//			    temp_sv1=_IQdiv2(v.Ubeta);                  /*divide by 2*/                 \
-//			    temp_sv2=_IQmpy(_IQ(0.8660254),v.Ualpha);   /* 0.8660254 = sqrt(3)/2*/      \
-//			                                                                                \
-//			/* Inverse clarke transformation */                                             \
-//			    Va = v.Ubeta;                                                               \
-//			    Vb = -temp_sv1 + temp_sv2;                                                  \
-//			    Vc = -temp_sv1 - temp_sv2;
+
 
 #define SVGEN_CLA_MACRO(v)														\
 	v.tmp1= v.Ubeta;															\

@@ -11,68 +11,65 @@
 #include "../ccVariables.h"
 #include "inc/hw_memmap.h"
 #include "sci.h"
-
+#include "SVGEN_CLA.h"
 void UpdateBits(void);
 void Update_DoBits(N16 strt, N16 flag);
 void BitsUpdate(N16 strt, N16 flag, int *A);
-void update_datablock_DI(N16 st_adr, N16 ncoils, N8 *buf);
-void update_datablock_DO(N16 st_adr, N16 ncoils, N8 *buf);
+void update_datablock_DO(void);
+void update_datablock_DI(void);
 
+extern SVGEN_CLA svgen_dq1;
 
-N16 DObitAddress[] = {100, 101, 102, 104, 107, 116, 122, 118};
-#define NUM_DOBITS  (sizeof(DObitAddress)/sizeof(DObitAddress[0]))
+N16 DObitAddress[] = {100, 101, 104, 105, 112, 117, 123, 126, 127};
 
-// Send a frame on the port the request came in on.
-// Common Controller v2: both ports are RS-485 and drive their enable line
-// (port A: GPIO34, port B: GPIO40). scix_xmit waits for TXEMPTY per character.
-static void port_xmit(N16 portNumber, N8 *buf, N16 n)
+// Two Modbus ports with the same register map:
+//   MB_PORT_A = SCIA, RS485 #2 (TXEN GPIO34)
+//   MB_PORT_B = SCIB, RS485 #1 (TXEN GPIO40), GUI port
+// pi_com() selects the port; the reply helpers below use rxbuffer and mb_putc().
+#define MB_PORT_A   0
+#define MB_PORT_B   1
+static N16 mbPort = MB_PORT_A;
+
+static void mb_putc(int c)
 {
-    N16 ix;
-
-    if(portNumber == MB_PORT_B)
-    {
-        EnableTX1();
-        for(ix=0;ix<n;ix++)
-            scib_xmit(buf[ix]);
-        DisableTX1();
-    }
-    else
-    {
-        EnableTX();
-        for(ix=0;ix<n;ix++)
-            scia_xmit(buf[ix]);
-        DisableTX();
-    }
+    if(mbPort == MB_PORT_B) scib_xmit(c);
+    else scia_xmit(c);
 }
+#define MB_TX_ON()  { if(mbPort == MB_PORT_B) { EnableTX1(); } else { EnableTX(); } }
+#define MB_TX_OFF() { if(mbPort == MB_PORT_B) { DisableTX1(); } else { DisableTX(); } }
 
-void    sendLog(N16 nPkt, N16 portNumber)
+void    sendLog(N16 nPkt)
 {
     N16 epAddr = 0, ix = 0, crc_act = 0;
-    N8 *buf = (portNumber == MB_PORT_B) ? rx_buffer1 : rx_buffer;
 
     if(nPkt == 5000)    //erase Log
     {
-        //EraseEventLog();
+        EraseEventLog();
         return;
     }
 
     epAddr = (nPkt << 6) + LOGSTART;
 
-    eeprom_read_words(epAddr,spiReadBuffer, RECSIZE);
+    eeprom_read(epAddr,RECSIZE);
 
-    buf[2] = (RECSIZE + RECSIZE);
+    rxbuffer[2] = (RECSIZE + RECSIZE);
 
     for(ix=0;ix < RECSIZE;ix++)
     {
-        buf[ix*2+3] = (spiReadBuffer[ix] >> 8);
-        buf[ix*2+4] = (spiReadBuffer[ix] & 0xff);
+        rxbuffer[ix*2+3] = (spiReadBuffer[ix] >> 8);
+        rxbuffer[ix*2+4] = (spiReadBuffer[ix] & 0xff);
     }
 
-    crc_act = TableCRC(buf,(RECSIZE + RECSIZE + 3));
+    crc_act = TableCRC(rxbuffer,(RECSIZE + RECSIZE + 3));
 
-     buf[(RECSIZE+RECSIZE+4)] =  crc_act >>8;
-     buf[(RECSIZE+RECSIZE+3)]= crc_act & 0xff;
-     port_xmit(portNumber, buf, RECSIZE+RECSIZE+5);
+     rxbuffer[(RECSIZE+RECSIZE+4)] =  crc_act >>8;
+     rxbuffer[(RECSIZE+RECSIZE+3)]= crc_act & 0xff;
+     MB_TX_ON();
+     MB_TX_ON();
+     MB_TX_ON();
+     for(ix=0;ix<(RECSIZE+RECSIZE+5);ix++)
+         mb_putc(rxbuffer[ix]);
+     MB_TX_OFF();
 }
 
 
@@ -82,9 +79,10 @@ void ModbusProcessing(void)
 		
 		if ( frame_complete == TRUE)
 		    {
-		        pi_com();
+		        UpdateBits();
+		        pi_com(MB_PORT_A);
 		    }
-	
+
 	    if((interchar_silent_timer >= INTERCHARDELAY) && (live_frame == TRUE))
 	    {
 		    if(char_waiting > 6)
@@ -94,44 +92,74 @@ void ModbusProcessing(void)
 	        	frame_complete = TRUE;
 	     	}
 	     	live_frame = FALSE;
-	    }  	
-	    
-	 } 
+	    }
 
-#define CMD_DEFAULT 999
-Uint16  _adr1 = 0, _val1 = 0;
-float32_t float_val = 0;
-long ltemp = 0;
-long ltemp1 = 0;
+	 }
 
-Uint16  pi_com(void)
+// SCIB (RS485 #1) framing, same as ModbusProcessing()
+void ModbusProcessing1(void)
+	{
+		if ( frame_complete1 == TRUE)
+		    {
+		        UpdateBits();
+		        pi_com(MB_PORT_B);
+		    }
+
+	    if((interchar_silent_timer1 >= INTERCHARDELAY) && (live_frame1 == TRUE))
+	    {
+		    if(char_waiting1 > 6)
+		    {
+	        	chars_rxd1 = char_waiting1 - 1;
+	        	char_waiting1 = 0;
+	        	frame_complete1 = TRUE;
+	     	}
+	     	live_frame1 = FALSE;
+	    }
+	 }
+
+
+Uint16  pi_com(N16 port)
 {
-    int _i = 0, Func = 0;
+    int i, Func = 0;
+    long ltemp = 0;
     Uint16	tx_count=0;
-
     Uint16 crc_rxd=0,crc_act=0,picom=0,ret;
     float32_t *fptr;
+    float32_t float_val = 0;
+    Uint16  nrx;                // received bytes - 1 (CRC high byte index)
+    Uint16  myAddress;
 
+    mbPort = port;
+    if(port == MB_PORT_B)
+    {
+        rxbuffer = &rx_buffer1[0];
+        frame_complete1 = FALSE;
+        nrx = chars_rxd1;
+        myAddress = address1;
+    }
+    else
+    {
+        rxbuffer = &rx_buffer[0];
+        frame_complete = FALSE;
+        nrx = chars_rxd;
+        myAddress = address;
+    }
 
-	rxbuffer = &rx_buffer[0];
-	frame_complete = FALSE;
-	
-	if(*(rxbuffer) == address)
+	if(*(rxbuffer) == myAddress)
 	{
-	 	crc_act = TableCRC(rxbuffer,chars_rxd-1);
-	    crc_rxd = (( (int) *(rxbuffer+chars_rxd) << 8) | (unsigned char) *(rxbuffer+chars_rxd-1));
+	 	crc_act = TableCRC(rxbuffer,nrx-1);
+	    crc_rxd = (( (int) *(rxbuffer+nrx) << 8) | (unsigned char) *(rxbuffer+nrx-1));
 		if (crc_rxd==crc_act)       // checking CRC
 	    {                               // add routine for service the functions
 
 		    st_addr = ((int)*(rxbuffer+2)<<8) | *(rxbuffer+3);
             nregs =   ((int)*(rxbuffer+4)<<8) | *(rxbuffer+5);
             Func = *(rxbuffer+1);
-            UpdateBits();
            switch(Func)
            {
 	       case MB_READDO:
 
-	                    if((nregs == 0) || (st_addr >= NPARAMS) || (nregs > (NPARAMS - st_addr)))
+	                    if((nregs + st_addr) > 200)
 	                    {
 	                        *(rxbuffer+1) = 0x81;
 	                        *(rxbuffer+2)=2;
@@ -141,14 +169,14 @@ Uint16  pi_com(void)
 
 	                        nBytes = (nregs + 7)>>3;
 	                        *(rxbuffer+2)= (unsigned char) nBytes;
-	                        update_datablock_DO(st_addr, nregs, rxbuffer);
+	                        update_datablock_DO();
 	                        tx_count= *(rxbuffer+2) + 5;
 	                    break;
 
 	           case MB_READDI:
-	               if((nregs == 0) || (st_addr >= NPARAMS) || (nregs > (NPARAMS - st_addr)))
+	               if((nregs + st_addr) > 200)
 	               {
-	                   *(rxbuffer+1) = 0x82;
+	                   *(rxbuffer+1) = 0x81;
 	                   *(rxbuffer+2)=2;
 	                   tx_count=5;
 	                   break;
@@ -156,14 +184,14 @@ Uint16  pi_com(void)
 
 	                   nBytes = (nregs + 7)>>3;
 	                   *(rxbuffer+2)= (unsigned char) nBytes;
-	                   update_datablock_DI(st_addr, nregs, rxbuffer);
+	                   update_datablock_DI();
 	                   tx_count= *(rxbuffer+2) + 5;
 	               break;
 
 	           case MB_SETDO:
 	                st_addr = ( (Uint16) *(rxbuffer+2)<<8) | *(rxbuffer+3);
 	                nregs =   ((int)*(rxbuffer+4)<<8) | *(rxbuffer+5);
-	                if((st_addr>99) && (st_addr < (100 + NUM_DOBITS)))
+	                if((st_addr>99) && (st_addr<110))
 	                            {
 	                                DOParams[st_addr] = nregs & 0x0001;
 	                                UpdateOneInt(DObitAddress[st_addr-100],nregs & 0x0001);
@@ -188,7 +216,7 @@ Uint16  pi_com(void)
 
 	                 if((st_addr>99) && (st_addr<110))
 	                                {
-	                                    if(*(rxbuffer+6) == 1)
+	                                    if(*(rxbuffer+6))
 	                                    {
 	                                      Update_DoBits(st_addr, *(rxbuffer+7));
                                           tx_count= 8;
@@ -203,7 +231,7 @@ Uint16  pi_com(void)
 	                                }
 	                 else
 	                 {
-	                       *(rxbuffer+1) = 0x8F;
+	                       *(rxbuffer+1) = 0x90;
 	                        *(rxbuffer+2)=3;
 	                        tx_count=5;
 	                 }
@@ -216,17 +244,17 @@ Uint16  pi_com(void)
 
                 if(st_addr > 0x1fff) //23c0
                      {
-                         sendLog(st_addr-0x2000, MB_PORT_A);
+                         sendLog(st_addr-0x2000);
                          return(picom);
                      }
 
                 if(st_addr > 0xfff)
      			{
-             		snapShot(st_addr, nregs, MB_PORT_A);
+             		snapShot(st_addr);
              		return(picom);
      			}
                                            
-             	if( ((nregs + st_addr) > 900) || (nregs>100))
+             	if( ((nregs + st_addr) > 700) || (nregs>100))
              	{
 					*(rxbuffer+1) = 0x83;
 					*(rxbuffer+2)=2;
@@ -234,20 +262,11 @@ Uint16  pi_com(void)
 					break;
 				}
 				
-//#define   INT_RANGE_WMIN 700
-//#define   INT_RANGE_WMAX 899
-//#define   FLOAT_RANGE_WMIN 200
-//#define   FLOAT_RANGE_WMAX 450
-//
-//#define   INT_RANGE_RMIN 500
-//#define   INT_RANGE_RMAX 899
-//#define   FLOAT_RANGE_RMIN 200
-//#define   FLOAT_RANGE_RMAX 450
-
+	
 					*(rxbuffer+2)= (unsigned char) nregs*2;
 
-					if(st_addr<INT_RANGE_RMIN) update_datablock(st_addr, nregs,rxbuffer);
-					else update_datablock_Int(st_addr, nregs,rxbuffer);
+					if(st_addr<500) update_datablock();
+					else update_datablock_Int();
 
 					tx_count=nregs*2+5;
 
@@ -258,14 +277,18 @@ Uint16  pi_com(void)
 				st_addr = ( (Uint16) *(rxbuffer+2)<<8) | *(rxbuffer+3);
 				nregs =   ((int)*(rxbuffer+4)<<8) | *(rxbuffer+5);
 				
+			    if ((st_addr == 11) && nregs) {
+			        RESET_FAULTS();
+
+			    }
+
 				if(st_addr == 999) { specialCommnad = CMD_DEFAULT; tx_count = 8; break; }
 
-				ret = 1;    // out of range -> exception reply
-
-				if((st_addr>=INT_RANGE_WMIN) && (st_addr < (INT_RANGE_WMIN + NUMWPARAMS1)))
+				if((st_addr>599) && (st_addr<700))
 				    {
 				        ret = UpdateOneInt(st_addr - 500,nregs);
-				        tx_count=8;
+				        Nop();
+				        Nop();
 				    }
                                                   
 					if(ret)
@@ -284,76 +307,55 @@ Uint16  pi_com(void)
 
                 st_addr = ( (N16) *(rxbuffer+2)<<8) | *(rxbuffer+3);
                 nregs =   ((int)*(rxbuffer+4)<<8) | *(rxbuffer+5);
-                if(st_addr == (BASE_RTC + 500))
+                     if(st_addr == BASE_RTC)
+                     {
+                         ArrayParamsI[BASE_RTC + 0] = ( (N16) *(rxbuffer+7)<<8) | *(rxbuffer+8);
+                         ArrayParamsI[BASE_RTC + 1] = ( (N16) *(rxbuffer+9)<<8) | *(rxbuffer+10);
+                         ArrayParamsI[BASE_RTC + 2] = ( (N16) *(rxbuffer+11)<<8) | *(rxbuffer+12);
+                         ArrayParamsI[BASE_RTC + 3] = ( (N16) *(rxbuffer+13)<<8) | *(rxbuffer+14);
+                         ArrayParamsI[BASE_RTC + 4] = ( (N16) *(rxbuffer+15)<<8) | *(rxbuffer+16);
+                         ArrayParamsI[BASE_RTC + 5] = ( (N16) *(rxbuffer+17)<<8) | *(rxbuffer+18);
+                         ArrayParamsI[BASE_RTC + 6] = ( (N16) *(rxbuffer+19)<<8) | *(rxbuffer+20);
+
+                         //SetTime(&ArrayParam[240]);
+
+                         seconds = RTCSecond;
+     //                    minutes = RTCMinute;
+     //                    hours = RTCHour;
+     //                    days = RTCDate;
+
+                         tx_count=8;
+                         break;
+                     }
+//                     if(st_addr == SERIAL_START)
+//                     {
+//                         ArrayParam[SERIAL_START + 0] = ( (N16) *(rxbuffer+7)<<8) | *(rxbuffer+8);
+//                         ArrayParam[SERIAL_START + 1] = ( (N16) *(rxbuffer+9)<<8) | *(rxbuffer+10);
+//                         ArrayParam[SERIAL_START + 2] = ( (N16) *(rxbuffer+11)<<8) | *(rxbuffer+12);
+//                         ArrayParam[SERIAL_START + 3] = ( (N16) *(rxbuffer+13)<<8) | *(rxbuffer+14);
+//                         ArrayParam[SERIAL_START + 4] = ( (N16) *(rxbuffer+15)<<8) | *(rxbuffer+16);
+//                         ArrayParam[SERIAL_START + 5] = ( (N16) *(rxbuffer+17)<<8) | *(rxbuffer+18);
+//                         ArrayParam[SERIAL_START + 6] = ( (N16) *(rxbuffer+19)<<8) | *(rxbuffer+20);
+//                         ArrayParam[SERIAL_START + 7] = ( (N16) *(rxbuffer+21)<<8) | *(rxbuffer+22);
+//                         ArrayParam[SERIAL_START + 8] = ( (N16) *(rxbuffer+23)<<8) | *(rxbuffer+24);
+//                         ArrayParam[SERIAL_START + 9] = ( (N16) *(rxbuffer+25)<<8) | *(rxbuffer+26);
+//
+//                         updateSerial();
+//
+//                         tx_count=8;
+//                         break;
+//                     }
+
+
+                if( nregs == 2 )
                 {
-                    st_addr = BASE_RTC;
-                    ArrayParamsI[BASE_RTC + 0] = ( (N16) *(rxbuffer+7)<<8) | *(rxbuffer+8);
-                    ArrayParamsI[BASE_RTC + 1] = ( (N16) *(rxbuffer+9)<<8) | *(rxbuffer+10);
-                    ArrayParamsI[BASE_RTC + 2] = ( (N16) *(rxbuffer+11)<<8) | *(rxbuffer+12);
-                    ArrayParamsI[BASE_RTC + 3] = ( (N16) *(rxbuffer+13)<<8) | *(rxbuffer+14);
-                    ArrayParamsI[BASE_RTC + 4] = ( (N16) *(rxbuffer+15)<<8) | *(rxbuffer+16);
-                    ArrayParamsI[BASE_RTC + 5] = ( (N16) *(rxbuffer+17)<<8) | *(rxbuffer+18);
-                    ArrayParamsI[BASE_RTC + 6] = ( (N16) *(rxbuffer+19)<<8) | *(rxbuffer+20);
+                    ltemp = (long) ((long)*(rxbuffer+7) <<24) | ((long)*(rxbuffer+8) <<16) | (*(rxbuffer+9)<<8) | *(rxbuffer+10);
+                    fptr = (float *) &ltemp;
+                    float_val = *fptr;
 
-#if RTC_PRESENT
-                    SetTime(&ArrayParamsI[BASE_RTC]);
-#endif
-
+                    ret = UpdateOne(st_addr/2,float_val);
                     tx_count=8;
-                    break;
                 }
-//                if(st_addr == SERIAL_START + 500)
-//                {
-//                    ArrayParamsI[SERIAL_START + 0] = ( (N16) *(rxbuffer+7)<<8) | *(rxbuffer+8);
-//                    ArrayParamsI[SERIAL_START + 1] = ( (N16) *(rxbuffer+9)<<8) | *(rxbuffer+10);
-//                    ArrayParamsI[SERIAL_START + 2] = ( (N16) *(rxbuffer+11)<<8) | *(rxbuffer+12);
-//                    ArrayParamsI[SERIAL_START + 3] = ( (N16) *(rxbuffer+13)<<8) | *(rxbuffer+14);
-//                    ArrayParamsI[SERIAL_START + 4] = ( (N16) *(rxbuffer+15)<<8) | *(rxbuffer+16);
-//                    ArrayParamsI[SERIAL_START + 5] = ( (N16) *(rxbuffer+17)<<8) | *(rxbuffer+18);
-//                    ArrayParamsI[SERIAL_START + 6] = ( (N16) *(rxbuffer+19)<<8) | *(rxbuffer+20);
-//                    ArrayParamsI[SERIAL_START + 7] = ( (N16) *(rxbuffer+21)<<8) | *(rxbuffer+22);
-//                    ArrayParamsI[SERIAL_START + 8] = ( (N16) *(rxbuffer+23)<<8) | *(rxbuffer+24);
-//                    ArrayParamsI[SERIAL_START + 9] = ( (N16) *(rxbuffer+25)<<8) | *(rxbuffer+26);
-//
-//                  //  updateSerial();
-//
-//                    tx_count=8;
-//                    break;
-               // }
-
-                if((st_addr >= INT_RANGE_WMIN) && (st_addr <= INT_RANGE_WMAX))
-                    {
-                        for(_i=0;_i<nregs;_i++)
-                              {
-                                     _adr1  = st_addr +_i - 500;
-                                     _val1 = rx_buffer[7+_i+_i]; _val1 <<= 8; _val1 |= rx_buffer[8+_i+_i];
-                                    UpdateOneInt(_adr1, _val1);
-                                    //ArrayParamsI[st_addr +_i - 500] =  (Uint16) (*(rxbuffer+7+_i+_i))<<8 | *(rxbuffer+8+_i+_i);
-                              }
-                        tx_count=8;
-                    }
-                else if((st_addr >= FLOAT_RANGE_WMIN) && (st_addr <= FLOAT_RANGE_WMAX))
-                    {
-                        if( nregs == 2 )
-                        {
-                            _adr1 = st_addr/2;
-                            ltemp1 = rx_buffer[7];
-                            ltemp = ltemp1 << 24;
-                            ltemp1 = rx_buffer[8];
-                            ltemp |= (ltemp1 << 16);
-                            ltemp1 = rx_buffer[9];
-                            ltemp |= (ltemp1 << 8);
-                            ltemp1 = rx_buffer[10];
-                            ltemp |= ltemp1;
-
-//                            ltemp = (long) ((long)*(rxbuffer+7) <<24) | ((long)*(rxbuffer+8) <<16) | (*(rxbuffer+9)<<8) | *(rxbuffer+10);
-                            fptr = (float *) &ltemp;
-                            float_val = *fptr;
-
-                            ret = UpdateOne(st_addr/2,float_val);
-                            tx_count=8;
-                        }
-                    }
                 else
                 {
                     *(rxbuffer+1) = 0x90;
@@ -376,62 +378,50 @@ Uint16  pi_com(void)
 				*(rxbuffer+tx_count-1) =  crc_act >>8;
 				*(rxbuffer+tx_count-2)= crc_act & 0xff;
 				
-				EnableTX();
-				for(_i=0;_i<tx_count;_i++)
+				MB_TX_ON();
+				for(i=0;i<tx_count;i++)
 				{
-					scia_xmit( (char) *(rxbuffer+_i));
+					mb_putc( (char) *(rxbuffer+i));
 				}
-				DisableTX();
-				live_frame     = FALSE;
+				MB_TX_OFF();
+				if(port == MB_PORT_B) live_frame1 = FALSE;
+				else live_frame = FALSE;
 			}
 
 		}          //if CRC ok condition ends here
 	}          //if ADDRESS ends here
-
 	return(picom);
 }
+#define     plot0       vOutR       // output voltages, common-mode removed
+#define     plot1       vOutY
+#define     plot2       vOutB
+#define     plot3       lpf_ioutR.y
+#define     plot4       lpf_ioutY.y
+#define     plot5       lpf_ioutB.y
+#define     plot6       lpf_vbypR.y
+#define     plot7       lpf_vbypY.y
+#define     plot8       lpf_vbypB.y
+#define     plot9       vcontrol.refa
+#define     plot10      vcontrol.refb
+#define     plot11      vcontrol.refc
+#define     plot12      vcontrol.alpha
+#define     plot13      vcontrol.beta
+#define     plot14      prH[0][0].out
+#define     plot15      vcontrol.vol.lpf_de.y
+#define     plot16      pllBypass.theta.sin_val
+#define     plot17      pllBypass.theta_0.sin_val
+#ifdef SHIFTED_FBACK
+    #define     plot18      theta_fb.sin_val
+#else
+    #define plot18      theta_inv.cos_val
+#endif
+#define     plot19      theta_inv.sin_val
 
-#define     plot0       lpf_vInpR.u
-#define     plot1       lpf_vInpY.u
-#define     plot2       lpf_vInpB.u
-#define     plot3       lpf_iInpR.y
-#define     plot4       lpf_iInpY.y
-#define     plot5       lpf_iInpB.y
-
-#define     plot6       lpf_vdc.y
-#define     plot7       IdcFback
-#define     plot8       idc1Fbk
-#define     plot9       ibatFbk
-#define     plot10      pid_idc.Out
-
-#define     plot11      RP1
-#define     plot12      RN1
-#define     plot13      YP1
-#define     plot14      YN1
-#define     plot15      BP1
-#define     plot16      BN1
-
-#define     plot17      vOutput //vol_Bph
-#define     plot18      pllGrid.theta_0.sin_val   //
-#define     plot19      pllGrid.theta.sin_val
-
-#define     plot21      RP2
-#define     plot22      RN2
-#define     plot23      YP2
-#define     plot24      YN2
-#define     plot25      BP2
-#define     plot26      BN2
-
-
-void snapShot(N16 st_addr, N16 nreg, N16 portNumber)
+void snapShot(N16 st_addr)
 {
 	int i;
 	long dat1;
 	long *nptr;
-	int k = 0;
-	int txCount = 0;
-	N16 crc1 = 0;
-	N16 increment = 1;
 
 switch(st_addr & 0xFF)
 	{
@@ -470,27 +460,21 @@ switch(st_addr & 0xFF)
 			break;
         case 11:
             waveptr =  &plot11;
-            if(bridge2) waveptr =  &plot21;
             break;
         case 12:
             waveptr =  &plot12;
-            if(bridge2) waveptr =  &plot22;
             break;
         case 13:
             waveptr =  &plot13;
-            if(bridge2) waveptr =  &plot23;
             break;
         case 14:
             waveptr =  &plot14;
-            if(bridge2) waveptr =  &plot24;
             break;
         case 15:
             waveptr =  &plot15;
-            if(bridge2) waveptr =  &plot25;
             break;
         case 16:
             waveptr =  &plot16;
-            if(bridge2) waveptr =  &plot26;
             break;
         case 17:
             waveptr =  &plot17;
@@ -506,104 +490,87 @@ switch(st_addr & 0xFF)
 	snap_end = 0;
 	while(!snap_end);		//wait for data capture
 
-	tx_buffer[0] = (portNumber == MB_PORT_B) ? address1 : address;
-	tx_buffer[1] = 0x3;
-
+	MB_TX_ON();
+	mb_putc((mbPort == MB_PORT_B) ? address1 : address);
+	mb_putc(0x3);
+	mb_putc(0x00);
 	nptr = (long *)&waveBuffer;
-	k = 3;
 
+		for(i=0;i < SNAP_SIZE;i++)
+		{
+			dat1 = *nptr;
+			mb_putc(dat1>>24);
+			mb_putc(dat1>>16);
+			mb_putc(dat1>>8);
+			mb_putc(dat1 & 0xff);
+			nptr++;
+		}
 
-	if(nreg == 100)
-	{
-	    txCount = 205;
-	    increment = 2;
-	}
-	else
-    {
-        txCount = 405;
-        increment = 1;
-    }
-	tx_buffer[2] = (txCount - 5) & 0xff;   // byte count field is 8 bits on the wire
-
-
-    for(i=0;i < SNAP_SIZE;i+=increment)
-    {
-        dat1 = *nptr;
-        tx_buffer[k++] = (dat1>>24) & 0xff;
-        tx_buffer[k++] = (dat1>>16) & 0xff;
-        tx_buffer[k++] = (dat1>>8) & 0xff;
-        tx_buffer[k++] = (dat1 & 0xff) & 0xff;
-        nptr++;
-    }
-
-	crc1 = TableCRC(tx_buffer,txCount-2);
-	tx_buffer[txCount-1] =   crc1 >>8;
-	tx_buffer[txCount-2] =   crc1 & 0xff;
-	port_xmit(portNumber, tx_buffer, txCount);
+		mb_putc(0x01);
+		mb_putc(0x02); //dummy CRC, no CRC check at receiving end
+		MB_TX_OFF();
 }
 
-void update_datablock_DO(N16 st_adr, N16 ncoils, N8 *buf)
+void update_datablock_DO(void)
 {
     Uint16 regCount = 0, posNow = 0;
     Uint16 byte1 = 0, t1 = 0;
-    Uint16 nbytes = (ncoils + 7) >> 3;
 
-     for(regCount = 0;regCount < nbytes;regCount++)
+
+     for(regCount = 0;regCount < nBytes;regCount++)
          {
              byte1 = 0;
              for(t1=0;t1<8;t1++)
              {
                  posNow = regCount*8 + t1;
-                 if(posNow >= ncoils) break;    // unused bits in last byte must be 0
-                 if(DOParams[st_adr + posNow]) byte1 |= (1 << t1);
+                 if(DOParams[st_addr + posNow]) byte1 |= (1 << t1);
              }
-             *(buf + regCount + 3) = (N8) byte1;
+             *(rxbuffer + regCount + 3) = (N8) byte1;
           } //end of for LOOP
  }
 
-
-void update_datablock_DI(N16 st_adr, N16 ncoils, N8 *buf)
+void update_datablock_DI(void)
 {
 
     Uint16 regCount = 0, posNow = 0;
     Uint16 byte1 = 0, t1 = 0;
-    Uint16 nbytes = (ncoils + 7) >> 3;
 
-     for(regCount = 0;regCount < nbytes;regCount++)
+
+     for(regCount = 0;regCount < nBytes;regCount++)
          {
              byte1 = 0;
              for(t1=0;t1<8;t1++)
              {
                  posNow = regCount*8 + t1;
-                 if(posNow >= ncoils) break;    // unused bits in last byte must be 0
-                 if(DIParams[st_adr + posNow]) byte1 |= (1 << t1);
+                 if(DIParams[st_addr + posNow]) byte1 |= (1 << t1);
              }
-             *(buf + regCount + 3) = (N8) byte1;
+             *(rxbuffer + regCount + 3) = (N8) byte1;
           }
 
  }
 
 
-void update_datablock_Int(N16 st_adr, N16 nreg, N8 *rxbuf)
+void update_datablock_Int(void)
     {
 
         Uint16 offset;
         Uint16 regCount;
         Uint16 TempValue = 0;
 
-        for(regCount=st_adr;regCount < st_adr + nreg;regCount++)
+
+        for(regCount=st_addr;regCount < st_addr + nregs;regCount++)
             {
-                offset = (regCount - st_adr) << 1;
+                offset = (regCount - st_addr) << 1;
                 offset += 3;    //offset for data bytes
                 TempValue = ArrayParamsI[regCount-500];
 
-                *(rxbuf + offset++) = TempValue >> 8;
-                *(rxbuf + offset)   = TempValue & 0xff;
+                *(rxbuffer + offset++) = TempValue >> 8;
+                *(rxbuffer + offset)   = TempValue & 0xff;
 
              } //end of for LOOP
     }
 
-void update_datablock(N16 st_adr, N16 nreg, N8 *rxbuf )
+void update_datablock(void)
     {
 
         Uint16 offset;
@@ -613,8 +580,9 @@ void update_datablock(N16 st_adr, N16 nreg, N8 *rxbuf )
         long val = 0;
         long *nptr = 0;
 
-        nregs_half = nreg >>1;
-        regStart = st_adr /2;
+        nregs_half = nregs >>1;
+
+        regStart = st_addr /2;
 
         for(regCount = 0;regCount < nregs_half;regCount++)
         	{
@@ -622,10 +590,10 @@ void update_datablock(N16 st_adr, N16 nreg, N8 *rxbuf )
 	        	nptr = (long *) &ArrayParamsF[regStart + regCount];
 	        	val = *nptr;
 
-	        	*(rxbuf + offset++) = val >>24;
-		        *(rxbuf + offset++)   = val >>16;
-                *(rxbuf + offset++) = val >>8;
-                *(rxbuf + offset)   = val & 0xff;
+	        	*(rxbuffer + offset++) = val >>24;
+		        *(rxbuffer + offset++)   = val >>16;
+                *(rxbuffer + offset++) = val >>8;
+                *(rxbuffer + offset)   = val & 0xff;
 
 		     } //end of for LOOP
     }
@@ -654,7 +622,8 @@ N16 CRC16(N16 *dat, N16 nbytes)
 
 N16 TableCRC ( BYTE *nData, WORD wLength)
 {
-static const WORD wCRCTable[] = {
+static const WORD wCRCTable[] =
+{
    0X0000, 0XC0C1, 0XC181, 0X0140, 0XC301, 0X03C0, 0X0280, 0XC241,
    0XC601, 0X06C0, 0X0780, 0XC741, 0X0500, 0XC5C1, 0XC481, 0X0440,
    0XCC01, 0X0CC0, 0X0D80, 0XCD41, 0X0F00, 0XCFC1, 0XCE81, 0X0E40,
@@ -686,7 +655,8 @@ static const WORD wCRCTable[] = {
    0X8801, 0X48C0, 0X4980, 0X8941, 0X4B00, 0X8BC1, 0X8A81, 0X4A40,
    0X4E00, 0X8EC1, 0X8F81, 0X4F40, 0X8D01, 0X4DC0, 0X4C80, 0X8C41,
    0X4400, 0X84C1, 0X8581, 0X4540, 0X8701, 0X47C0, 0X4680, 0X8641,
-   0X8201, 0X42C0, 0X4380, 0X8341, 0X4100, 0X81C1, 0X8081, 0X4040 };
+   0X8201, 0X42C0, 0X4380, 0X8341, 0X4100, 0X81C1, 0X8081, 0X4040
+};
 
 BYTE nTemp;
 WORD wCRCWord = 0xFFFF;
@@ -715,7 +685,6 @@ void BitsUpdate(N16 strt, N16 flag, int *A)
         }
 }
 
-
 void Update_DoBits(N16 strt, N16 flag)
 {
     Uint16 k = 0;
@@ -734,23 +703,21 @@ void UpdateBits(void)
     BitsUpdate(32, AlarmFlag3, DOParams);
     BitsUpdate(48, AlarmFlag4, DOParams);
     BitsUpdate(64, AlarmFlag5 , DOParams);
-    BitsUpdate(80, AlarmFlag6 , DOParams);
-    BitsUpdate(96, AlarmFlag7 , DOParams);
-    BitsUpdate(112, AlarmFlag8 , DOParams);
+    BitsUpdate(80, RelayFlag,  DOParams);
+    BitsUpdate(96, CommStatusFlag , DOParams);
 
-//    UnitOnCommand_Bit       = UnitOnCommand ;
-//    AcceptReset_Bit         = AcceptReset   ;
-//    TestMode_Bit            = TestMode      ;
-//    emShutdown_Bit          = emShutdown    ;
-//    UpdateEEPROM_Bit        = UpdateEEPROM  ;
-//    PFSign_Bit              = PFSign        ;
-//    RevPolarity_Bit         = RevPolarity   ;
+    UnitOnCommand_Bit       = UnitOnCommand ;
+    AcceptReset_Bit         = AcceptReset   ;
+    TestMode_Bit            = TestMode      ;
+    Master_Bit              = Master        ;
+    emShutdown_Bit          = EmergencyStop    ;
+    autoBypassFlag_Bit      = autoBypassFlag;
+    BypassAbscent_Bit       = BypassAbscent ;
+    UpdateEEPROM_Bit        = UpdateEEPROM  ;
+    PFSign_Bit              = PFSign        ;
+    RevPolarity_Bit         = RevPolarity   ;
 
-    BitsUpdate(0, 0x1111, DIParams);
-    BitsUpdate(1, 0x2222, DIParams);
-    BitsUpdate(2, 0x4444, DIParams);
-    BitsUpdate(3, 0x8888, DIParams);
-    BitsUpdate(4, 0x5555, DIParams);
+    BitsUpdate(0, DigitalInputFlag1, DIParams);
 
 }
 

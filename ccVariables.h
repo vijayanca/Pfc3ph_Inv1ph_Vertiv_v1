@@ -1,274 +1,370 @@
-#ifndef __CCVARIABLESH__
-#define __CCVARIABLESH__
 
+#ifndef __CCVARIABLES__
+#define __CCVARIABLES__
+
+
+#include "device.h"
+#include "driverlib.h"
+#include "include\inc\hw_types.h"
+#include "include\pi.h"
+#include "SVGEN_CLA.h"
+#include "PID_GRANDO_F.h"
 #include "pi.h"
-#include "../include/pi.h"
-#include "rectDefines.h"
-#include "RectParams.h"
-#include "controlMacros.h"
-#include "pll3ph.h"
-#include "can.h"
 #include "can1.h"
+#include <math.h>
 #include "mcan.h"
-
-//CCEXTERN    float vdcCycleFbk INIT0;
-CCEXTERN    float idc1CycleFbk INIT0;
-CCEXTERN    float idc2CycleFbk INIT0;
-CCEXTERN    float idcCycleFbk INIT0;
-CCEXTERN    float ibatCycleFbk INIT0;
-
-CCEXTERN    float    idcSignal INIT0;
-CCEXTERN    volatile float    angle INIT0;
-CCEXTERN    float    sin600 INIT0;
-
-CCEXTERN    volatile N32 alpha_R_start INIT0;
-CCEXTERN    volatile N32 alpha_Y_start INIT0;
-CCEXTERN    volatile N32 alpha_B_start INIT0;
+#include "inv3phDefines.h"
+#include "inv3phParams.h"
+#include "pll3ph.h"
+#include "controlMacros.h"
+#include "BoardMacros.h"
 
 
+CCEXTERN    union canPacket rxPacket;
+CCEXTERN    union canPacket txPacket;
+CCEXTERN    volatile Uint16 InputOK_timer INIT0;
+CCEXTERN    volatile Uint16 inverterOK INIT0;
+CCEXTERN    volatile Uint16 canHWDone INIT0;
+
+CCEXTERN   volatile N16 Inv_HalfPeriod INIT0;
+CCEXTERN   volatile N16 InvPwmPeriod INIT0;
+CCEXTERN   volatile N16 DCOVTimer INIT0;
+CCEXTERN   volatile N16 OffsetNotDone INIT0;
+
+
+CCEXTERN    long offsets[20] INITARRAY0;
+CCEXTERN    N16 temp_fsw1 INIT0;
+CCEXTERN    N16 capCount INIT0;
 CCEXTERN    volatile N16 temp_AdcIsrCount INIT0;
 CCEXTERN    volatile N16 temp_T0IsrCount INIT0;
-CCEXTERN    volatile N16 temp_T1IsrCount INIT0;
-CCEXTERN    volatile N16 temp_T2IsrCount INIT0;
-CCEXTERN    volatile N16 temp_zcdRCount INIT0;
-CCEXTERN    volatile N16 temp_zcdYCount INIT0;
-CCEXTERN    volatile N16 temp_zcdBCount INIT0;
-CCEXTERN    volatile N16 temp_canRxCount INIT0;
-CCEXTERN    volatile N16 canInitTimer INIT0;
-CCEXTERN    volatile N16 AutoSaveTimer INIT0;
-CCEXTERN    volatile N16 freqNotSet INIT0;
-CCEXTERN    volatile N16 tmp_cycle3count INIT0;
-CCEXTERN    volatile N16 ncycle INIT0;
+
+// Sized for the CAN-A display broadcast (mcanInterface.c: ArrayParamsF[0..239],
+// ArrayParamsI[0..399]); the inverter map uses the first NPARAMS of each
+CCEXTERN    float32_t ArrayParamsF[NPARAMS + 50] INITARRAY0;
+CCEXTERN    int ArrayParamsI[NPARAMS + NPARAMS] INITARRAY0;
+CCEXTERN    int DOParams[NPARAMS] INITARRAY0;
+CCEXTERN    int DIParams[NPARAMS] INITARRAY0;
+
+CCEXTERN    volatile Uint16 parTimer INIT0;
 
 CCEXTERN    volatile Uint16 last_stored_time INIT0;
-//CCEXTERN    volatile Uint16 recordWriteTimer INIT0;
+CCEXTERN    volatile Uint16 recordWriteTimer INIT0;
 CCEXTERN    volatile Uint16 old_RecordNumber INIT0;
+CCEXTERN    Uint16 PowerOnDelay INIT0;
+CCEXTERN    eventPacket Events[4];
+CCEXTERN    eventPacket EventTX;
 
-CCEXTERN    volatile float    extVref INIT0;
-CCEXTERN    volatile float    extIbatref INIT0;
-CCEXTERN    volatile float    pll_omega INIT0;
+CCEXTERN    volatile float32_t    reference_current INIT0;
+CCEXTERN    harmonic cur;
+CCEXTERN    harmonic cur_neg;
+CCEXTERN    volatile float32_t dummy_comp INIT0;
+CCEXTERN    volatile float32_t curAlpha INIT0;
+CCEXTERN    volatile float32_t curBeta INIT0;
+CCEXTERN    volatile float32_t temp_deref INIT0;
 
-CCEXTERN    volatile float fact1 INIT0;
-CCEXTERN    volatile float fact2 INIT0;
+CCEXTERN    LPF32 lpf32_vinvr,lpf32_vinvy, lpf32_vinvb;
+CCEXTERN    LPF32 lpf32_iinvr,lpf32_iinvy, lpf32_iinvb;
+CCEXTERN    LPF32 lpf32_vllr,lpf32_vlly, lpf32_vllb;
 
-CCEXTERN    volatile long count_60_Sum INIT0;
-CCEXTERN    volatile long count_60_Sum_1 INIT0;
-CCEXTERN    volatile N16 count60_count INIT0;
+CCEXTERN    LPF32 lpf32_voutr,lpf32_vouty, lpf32_voutb;
+CCEXTERN    LPF32 lpf32_ioutr,lpf32_iouty, lpf32_ioutb;
+CCEXTERN    LPF32 lpf32_vbypr,lpf32_vbypy, lpf32_vbypb;
+CCEXTERN    LPF32 lpf32_vbypry,lpf32_vbypyb, lpf32_vbypbr;
 
-CCEXTERN    float      RP1    INIT0;
-CCEXTERN    float      RN1    INIT0;
-CCEXTERN    float      YP1    INIT0;
-CCEXTERN    float      YN1    INIT0;
-CCEXTERN    float      BP1    INIT0;
-CCEXTERN    float      BN1    INIT0;
-CCEXTERN    float      RP2    INIT0;
-CCEXTERN    float      RN2    INIT0;
-CCEXTERN    float      YP2    INIT0;
-CCEXTERN    float      YN2    INIT0;
-CCEXTERN    float      BP2    INIT0;
-CCEXTERN    float      BN2    INIT0;
+CCEXTERN    volatile float32_t vry INIT0;
+CCEXTERN    volatile float32_t vyb INIT0;
+CCEXTERN    volatile float32_t vbr INIT0;
 
-CCEXTERN    float      ZCDP    INIT0;
-CCEXTERN    float      ZCDN    INIT0;
-
-CCEXTERN    volatile float      referenceV    INIT0;
-CCEXTERN    volatile float      referenceI    INIT0;
-CCEXTERN    volatile float      mainsFailLevel    INIT0;
-CCEXTERN    volatile float      ocLevel    INIT0;
-
-CCEXTERN    volatile int setAddr INIT0;
-CCEXTERN    volatile N16 paramUpdate INIT0;
-
-CCEXTERN    MIN_MAX chkFrequency;
-CCEXTERN    MIN_MAX chkVr;
-CCEXTERN    MIN_MAX chkVy;
-CCEXTERN    MIN_MAX chkVb;
-CCEXTERN    MIN_MAX chkIr;
-CCEXTERN    MIN_MAX chkIy;
-CCEXTERN    MIN_MAX chkIb;
-CCEXTERN    MIN_MAX chkVdc;
-CCEXTERN    MIN_MAX chkIdc;
-CCEXTERN    MIN_MAX chkIbat;
-CCEXTERN    MIN_MAX chkVbat;
-CCEXTERN    MIN_MAX chkVload;
-
-CCEXTERN    RELAY MainConRLY[12];
-CCEXTERN    RELAY IOM1RLY[16];
-CCEXTERN    RELAY IOM2RLY[16];
-
+CCEXTERN    volatile Uint16 DItimers[16] INITARRAY0;
+CCEXTERN    volatile Uint16 DIpins[16] INITARRAY0;
 CCEXTERN    N32 CanID INIT0;
 CCEXTERN    N16 InitCANFlag INIT0;
 CCEXTERN    N16 msgPending INIT0;
-CCEXTERN    N16 txinProgress  INIT0;
+CCEXTERN    N16 autoSaveFlag  INIT0;
+CCEXTERN    N16 txMsgCount_tmp  INIT0;
+//CCEXTERN    N16 Dmax_Ramping  INIT0;
+CCEXTERN    N16 waitTimer  INIT0;
+
+
 CCEXTERN    tCANMsgObject sTXCANMessage;
 CCEXTERN    tCANMsgObject sRXCANMessage;
-CCEXTERN    N16 oldmsCount  INIT0;
-CCEXTERN    N16 oldmsCount1  INIT0;
-CCEXTERN    N16 volatile ms_old  INIT0;
-CCEXTERN    N16 canTxPakcetCount  INIT0;
-CCEXTERN    N16 canTxPakcetCount1  INIT0;
-CCEXTERN    unsigned char txMsgData[8];
-CCEXTERN    unsigned char ucRXMsgData[8];
 
-CCEXTERN    Uint16  eventCounter INIT0;
-CCEXTERN    Uint16  msgCounter INIT0;
-CCEXTERN    Uint16  CANDataAddress INIT0;
-CCEXTERN    Uint16  CANRXAddress INIT0;
-CCEXTERN    Uint16  errorRx INIT0;      // SCIA (RS485 #2) receive error
-CCEXTERN    Uint16  errorRx1 INIT0;     // SCIB (RS485 #1) receive error count
-//CCEXTERN    Uint16  LedFlag INIT0;
-
-CCEXTERN    Uint16  R_msCount INIT0;
-CCEXTERN    Uint16  Y_msCount INIT0;
-CCEXTERN    Uint16  B_msCount INIT0;
-
-CCEXTERN    LPF32 lpf32Vdc, lpf32Vload;
-CCEXTERN    LPF32 lpf32Idc;
-CCEXTERN    LPF32 lpf32Ibat;
-CCEXTERN    LPF32 lpf32Vbat;
-
-CCEXTERN    LPF32 lpf32Ir, lpf32Iy, lpf32Ib;
-
-CCEXTERN    LPF32 lpf32IBridge1;
-CCEXTERN    LPF32 lpf32IBridge2;
-
-CCEXTERN    volatile Uint16 StartupTimer INIT0;
-CCEXTERN    volatile Uint16 PrechargeTimer INIT0;
-CCEXTERN    volatile Uint16 WaitDelayTimer INIT0;
-
-CCEXTERN    volatile Uint16 VDCLowLimitTimer INIT0;
-CCEXTERN    volatile Uint16 VDCHighLimitTimer INIT0;
-CCEXTERN    volatile Uint16 IDCLowLimitTimer INIT0;
-CCEXTERN    volatile Uint16 IDCHighLimitTimer INIT0;
-CCEXTERN    volatile Uint16 tmp_zcdCount    INIT0;
-CCEXTERN    volatile Uint16 tmp_zcdnCount    INIT0;
-CCEXTERN    volatile Uint16 VInpRLowLimitTimer INIT0;
-CCEXTERN    volatile Uint16 VInpRHighLimitTimer INIT0;
-CCEXTERN    volatile Uint16 VInpYLowLimitTimer INIT0;
-CCEXTERN    volatile Uint16 VInpYHighLimitTimer INIT0;
-CCEXTERN    volatile Uint16 VInpBLowLimitTimer INIT0;
-CCEXTERN    volatile Uint16 VInpBHighLimitTimer INIT0;
-CCEXTERN    volatile Uint16 IdcHLTimer INIT0;
-CCEXTERN    volatile Uint16 tmp_pidcount INIT0;
-CCEXTERN    volatile long periodCount INIT0;
-
-CCEXTERN    volatile Uint16 FreqR_mscount INIT0;
-CCEXTERN    volatile Uint16 FreqY_mscount INIT0;
-CCEXTERN    volatile Uint16 FreqB_mscount INIT0;
-
-CCEXTERN    volatile Uint16 rp_count INIT0;
-CCEXTERN    volatile Uint16 bp_count INIT0;
-CCEXTERN    volatile Uint16 rseqCount INIT0;
-CCEXTERN    volatile Uint16 zcdCount INIT0;
-CCEXTERN    volatile long halfWidth INIT0;
-CCEXTERN    volatile Uint16 ZCDR INIT0;
-
-CCEXTERN    volatile Uint16 VinprOK_timer INIT0;
-CCEXTERN    volatile Uint16 VinpyOK_timer INIT0;
-CCEXTERN    volatile Uint16 VinpbOK_timer INIT0;
-
-CCEXTERN    volatile N16    InputOKtimer INIT0;
-CCEXTERN    volatile N16    triggered INIT0;
-
-CCEXTERN    volatile Uint16 doRead INIT0;
-CCEXTERN    volatile Uint16 wptr INIT0;
-CCEXTERN    volatile Uint16 cycleptr INIT0;
-CCEXTERN    Uint16 samplesPerCycle INIT0;
-CCEXTERN    volatile Uint16    nPoints INIT0;
-
-CCEXTERN	N16 spiUpdate INIT0;
-CCEXTERN	volatile N16 epr_read_enable INIT0;
-CCEXTERN	volatile N16 epr_delay INIT0;
-CCEXTERN	volatile N16 spi_timeout INIT0;
-CCEXTERN	volatile N16 spi_error INIT0;
-CCEXTERN	volatile N16 inc INIT0;
-CCEXTERN	N16 spiTimeOutCount INIT0;
-CCEXTERN	N16 spiTimeout INIT0;
-CCEXTERN	Uint16 spiReadBuffer[32] INITARRAY0;
-CCEXTERN	Uint16 spiWriteBuffer[32] INITARRAY0;
-
-
-CCEXTERN    unsigned char rx_buffer[220] INITARRAY0;
-CCEXTERN    unsigned char rx_buffer1[220] INITARRAY0;
-CCEXTERN    unsigned char tx_buffer[420] INITARRAY0;
-
-CCEXTERN    volatile Uint16 interchar_silent_timer INIT0;
-CCEXTERN    volatile Uint16 char_waiting INIT0;
-CCEXTERN    volatile Uint16 chars_rxd INIT0;
-CCEXTERN    volatile Uint16 address INIT0;
-CCEXTERN    volatile N16 fastOCTrip INIT0;     // set by the 1 kHz DC overload check, cleared by updateStatus()
-CCEXTERN    volatile Uint16 vptr INIT0;
-CCEXTERN	unsigned char *rxbuffer;
-CCEXTERN    unsigned char *rxbuffer1;
-
-CCEXTERN	unsigned char *datablock;
-CCEXTERN	int ArrayParamsI[NPARAMS + NPARAMS] INITARRAY0;
-CCEXTERN    float ArrayParamsF[NPARAMS + 50] INITARRAY0;
-CCEXTERN    int DOParams[NPARAMS] INITARRAY0;
-CCEXTERN    int DIParams[NPARAMS] INITARRAY0;
-CCEXTERN	volatile float waveBuffer[SNAP_SIZE] INITARRAY0;
-
-CCEXTERN    volatile float vdc_buf[150] INITARRAY0;
-CCEXTERN    volatile float idc1_buf[150] INITARRAY0;
-CCEXTERN    volatile float idc2_buf[150] INITARRAY0;
-CCEXTERN    volatile float ibat_buf[150] INITARRAY0;
+CCEXTERN    tCANMsgObject sTXMCANMessage;
+CCEXTERN    tCANMsgObject sRXMCANMessage;
 
 CCEXTERN    volatile int setAddrF INIT0;
 CCEXTERN    volatile float setValueF INIT0;
 CCEXTERN    volatile int setValueI INIT0;
 CCEXTERN    volatile int setAddrI INIT0;
 
-CCEXTERN    volatile N16 dummyEvent INIT0;
-CCEXTERN    volatile N16 iom1_canFailTimer INIT0;
-CCEXTERN    volatile N16 iom2_canFailTimer INIT0;
 
-CCEXTERN	N16 _RTCSecond INIT0;
-CCEXTERN	N16 _RTCMinute INIT0;
-CCEXTERN	N16 _RTCHour INIT0;
-CCEXTERN	N16 _RTCDate INIT0;
-CCEXTERN	N16 _RTCMonth INIT0;
-CCEXTERN	N16 _RTCYear INIT0;
+CCEXTERN    volatile int setAddr INIT0;
+CCEXTERN    volatile int setValue INIT0;
+CCEXTERN    N16 acceptResetCommnad  INIT0;
 
-CCEXTERN	volatile Uint16 rms_samplecount INIT0;
-CCEXTERN	volatile Uint16 rms_update_flag INIT0;
-CCEXTERN	volatile Uint16 frame_complete INIT0;
-CCEXTERN	volatile Uint16 live_frame INIT0;
-CCEXTERN	volatile Uint16 rsync INIT0;
-CCEXTERN	volatile Uint16 old_ms INIT0;
-CCEXTERN	volatile Uint16 delayCount INIT0;
-CCEXTERN	volatile Uint16 delayCount1 INIT0;
 
+CCEXTERN    N16 paramUpdate  INIT0;
+CCEXTERN    N16 screenNumber  INIT0;
+CCEXTERN    N16 oldmsCount  INIT0;
+CCEXTERN    N16 ms_old  INIT0;
+CCEXTERN    N16 canTxPakcetCount  INIT0;
+CCEXTERN    unsigned char txMsgData[8];
+CCEXTERN    unsigned char ucRXMsgData[8];
+
+CCEXTERN    volatile float32_t    Angle INIT0;
+CCEXTERN    volatile float32_t    angleActive INIT0;
+
+CCEXTERN    volatile float32_t    Vdc_Ref INIT0;
+CCEXTERN    volatile float32_t    Idc_Ref INIT0;
+CCEXTERN    volatile float32_t    soft_VdcRef INIT0;
+CCEXTERN    volatile float32_t    soft_IdcRef INIT0;
+
+CCEXTERN    float32_t    Va INIT0;
+CCEXTERN    float32_t    Vb INIT0;
+CCEXTERN    float32_t    Vc INIT0;
+
+CCEXTERN    volatile float32_t    t1 INIT0;
+CCEXTERN    volatile float32_t    t2 INIT0;
+CCEXTERN    volatile float32_t    temp_sv1 INIT0;
+CCEXTERN    volatile float32_t    temp_sv2 INIT0;
+CCEXTERN    volatile float32_t    iOffset INIT0;
+CCEXTERN    volatile float32_t    Vry INIT0;
+CCEXTERN    volatile float32_t    Vyb INIT0;
+CCEXTERN    volatile float32_t    Vbr INIT0;
+
+CCEXTERN    volatile float32_t    Angle_000 INIT0;
+CCEXTERN    volatile float32_t    Angle_120 INIT0;
+CCEXTERN    volatile float32_t    Angle_240 INIT0;
+
+
+CCEXTERN    float32_t fund_piout  INIT0;
+CCEXTERN    float32_t volt_gain   INIT0;
+CCEXTERN    float32_t reference_current_R INIT0;
+CCEXTERN    float32_t reference_current_Y INIT0;
+CCEXTERN    float32_t reference_current_B INIT0;
+CCEXTERN    float32_t reference_voltage_R INIT0;
+CCEXTERN    float32_t reference_voltage_Y INIT0;
+CCEXTERN    float32_t reference_voltage_B INIT0;
+
+CCEXTERN    volatile float32_t    dcLinkReference INIT0;
+CCEXTERN    volatile float32_t    dcLinkReferenceH INIT0;
+CCEXTERN    volatile float32_t    dcLinkReferenceL INIT0;
+CCEXTERN    volatile float32_t    dcLinkSoftRef INIT0;
+CCEXTERN    volatile float32_t    chprRef INIT0;
+CCEXTERN    volatile float32_t    chprIRef INIT0;
+CCEXTERN    volatile float32_t    soft_ChopperRef INIT0;
+CCEXTERN    float32_t LowValue INIT0;
+CCEXTERN    float32_t LowDelay INIT0;
+CCEXTERN    volatile float32_t    res_Ds INIT0;
+CCEXTERN    volatile float32_t    res_Qs INIT0;
+
+CCEXTERN    float32_t  ffvd INIT0;
+CCEXTERN    float32_t  ccvq INIT0;
+CCEXTERN    float32_t  ccvd INIT0;
+CCEXTERN    float32_t  cross INIT0;
+CCEXTERN    float32_t harm_ref_de INIT0;
+
+CCEXTERN    int harm_select INIT0;
+CCEXTERN    float32_t  temp_comp INIT0;
+CCEXTERN    float32_t temp_qe_1 INIT0;
+CCEXTERN    float32_t temp_de_1 INIT0;
+
+//CCEXTERN    volatile float32_t remoteAngle INIT0;
+//CCEXTERN    volatile float32_t remoteOmega INIT0;
+//CCEXTERN    volatile float32_t remoteIref INIT0;
+//CCEXTERN    volatile float32_t remoteVref INIT0;
+
+CCEXTERN    float32_t overvoltage_setting INIT0;
+CCEXTERN    float32_t voltage_ramp_slope  INIT0;
+CCEXTERN    float32_t breaker_close_voltage   INIT0;
+CCEXTERN    float32_t voltage_buildup_level   INIT0;
+CCEXTERN    float32_t capacitor_voltage_reference INIT0;
+CCEXTERN    float32_t voltage_reference_setting   INIT0;
+CCEXTERN    float32_t initial_capacitor_reference INIT0;
+CCEXTERN    float32_t power_factor_set  INIT0;
+CCEXTERN    float32_t power_factor    INIT0;
+CCEXTERN    float32_t v_alpha INIT0;
+CCEXTERN    float32_t v_beta  INIT0;
+
+CCEXTERN    float32_t ibatReference  INIT0;
+CCEXTERN    float32_t vbatReference  INIT0;
+CCEXTERN    float32_t buckPID  INIT0;
+
+CCEXTERN    float32_t sumDCR   INIT0;
+CCEXTERN    float32_t sumDCY   INIT0;
+CCEXTERN    float32_t sumDCB   INIT0;
+
+CCEXTERN    LPF lpf_vInvR, lpf_vInvY, lpf_vInvB;
+CCEXTERN    LPF lpf_iInvR, lpf_iInvY, lpf_iInvB;
+CCEXTERN    LPF lpf_ioutR, lpf_ioutY, lpf_ioutB;
+CCEXTERN    LPF lpf_voutR, lpf_voutY, lpf_voutB;
+CCEXTERN    LPF lpf_vbypR, lpf_vbypY, lpf_vbypB;
+
+CCEXTERN    LPF lpf_dclink, lpf_vbat, lpf_ibat;
+CCEXTERN    LPF lpf_temp1, lpf_temp2;
+CCEXTERN    LPF lpf_curRef;
+
+CCEXTERN    LPF lpf_bias;
+CCEXTERN    LPF lpf_Freq;
+//CCEXTERN    LPF lpf_vout_de;
+//CCEXTERN    LPF lpf_vout_qe;
+
+
+CCEXTERN    N16 spiUpdate INIT0;
+CCEXTERN    volatile N16 epr_read_enable INIT0;
+CCEXTERN    volatile N16 epr_delay INIT0;
+CCEXTERN    volatile N16 spi_timeout INIT0;
+CCEXTERN    volatile N16 spi_error INIT0;
+CCEXTERN    volatile N16 inc INIT0;
+CCEXTERN    volatile N16 kbdCol INIT0;
+CCEXTERN    volatile N16 kbdRow INIT0;
+CCEXTERN    volatile N16 newPress INIT0;
+CCEXTERN    volatile N16 toggleCount INIT0;
+CCEXTERN    volatile N16 passwordLevel INIT0;
+CCEXTERN    volatile N16 keyReleased INIT0;
+CCEXTERN    volatile N16 menuActive INIT0;
+CCEXTERN    volatile N16 lastKey INIT0;
+
+CCEXTERN    int Grid_Freq  INIT0;
+CCEXTERN    volatile N16 kbdRowStatus INIT0;
+
+CCEXTERN    volatile N16 newKeypress INIT0;
+CCEXTERN    volatile N16 lcdBackLightTimer INIT0;
+CCEXTERN    volatile N16 menuTimer INIT0;
+CCEXTERN    volatile N16 shift INIT0;
+CCEXTERN    volatile N16 IbatEnable_old INIT0;
+CCEXTERN    volatile N16 lcdBusy INIT0;
+CCEXTERN    volatile N16 beat INIT0;
+CCEXTERN    volatile int pwm1Ref_old INIT0;
+CCEXTERN    volatile int pwm2Ref_old INIT0;
+
+CCEXTERN    volatile Uint16 spiReadyTimer INIT0;
+CCEXTERN    volatile float32_t zcdR INIT0;
+CCEXTERN    unsigned char rx_buffer[240] INITARRAY0;
+
+// Modbus on SCIB (RS485 #1, GUI port): same register map as SCIA, own frame state
+CCEXTERN    unsigned char rx_buffer1[240] INITARRAY0;
+CCEXTERN    unsigned char *rxbuffer1;
 CCEXTERN    volatile Uint16 frame_complete1 INIT0;
 CCEXTERN    volatile Uint16 live_frame1 INIT0;
 CCEXTERN    volatile Uint16 interchar_silent_timer1 INIT0;
 CCEXTERN    volatile Uint16 char_waiting1 INIT0;
 CCEXTERN    volatile Uint16 chars_rxd1 INIT0;
 CCEXTERN    volatile Uint16 address1 INIT0;
-CCEXTERN    volatile Uint16 st_addr1 INIT0;
-CCEXTERN    volatile Uint16 nregs1 INIT0;
+CCEXTERN    Uint16  errorRx1 INIT0;     // SCIB receive error count
 
-CCEXTERN    RtcType     RTC;
-CCEXTERN	volatile Uint16 status_flag INIT0;
-CCEXTERN	volatile Uint16 msDelayCounter INIT0;
-CCEXTERN	volatile Uint16 transmitNow INIT0;
-CCEXTERN	volatile Uint16 st_addr INIT0;
-CCEXTERN	volatile Uint16 nregs INIT0;
-CCEXTERN	volatile Uint16 mainLoopCount INIT0;
+CCEXTERN    N16 spiTimeOutCount INIT0;
+CCEXTERN    N16 spiTimeout INIT0;
 
-CCEXTERN	volatile Uint16 seconds_old INIT0;
-CCEXTERN	volatile Uint16 rxChar INIT0;
-CCEXTERN	volatile Uint16 txNow INIT0;
-CCEXTERN	volatile Uint16 clearFlag INIT0;
-CCEXTERN	volatile Uint16 saveCounter INIT0;
-CCEXTERN	volatile Uint16 lastCount INIT0;
+CCEXTERN    Uint16 spiReadBuffer[32] INITARRAY0;
+CCEXTERN    Uint16 spiWriteBuffer[32] INITARRAY0;
+CCEXTERN    volatile Uint16 quarterCycleCount INIT0;
 
-CCEXTERN	volatile Uint16 CANOKTimer INIT0;
-CCEXTERN    volatile Uint16 ReferenceChangedFlag INIT0;
+CCEXTERN    unsigned char *rxbuffer;
+CCEXTERN    unsigned char *datablock;
 
+#ifndef PHASE3PH
+CCEXTERN    float32_t  betaI_Buffer[110];
+CCEXTERN    float32_t  betaVout_Buffer[110];
+CCEXTERN    float32_t  betaVinv_Buffer[110];
+CCEXTERN    float32_t  betaVbypass_Buffer[110];
+CCEXTERN    volatile Uint16 betaPtr INIT0;
+CCEXTERN     float32_t betaI INIT0;
+CCEXTERN     float32_t betaV INIT0;
+CCEXTERN     float32_t betaVout INIT0;
+CCEXTERN     float32_t betaVbyp INIT0;
+#endif
 
-CCEXTERN	volatile Uint16 DI1timer INIT0;
-CCEXTERN	volatile Uint16 DI2timer INIT0;
-CCEXTERN	volatile Uint16 DI3timer INIT0;
+CCEXTERN    volatile float32_t waveBuffer[100] INITARRAY0; //50
+CCEXTERN    float32_t vOutR INIT0;      // output voltages with SVPWM common mode removed
+CCEXTERN    float32_t vOutY INIT0;      // (measurement / plots only, see AdcISR)
+CCEXTERN    float32_t vOutB INIT0;
+CCEXTERN    volatile float32_t phasShift INIT0;
+
+CCEXTERN    volatile float32_t FrequencyF INIT0;
+
+CCEXTERN    volatile int posCounter INIT0;
+CCEXTERN    volatile int negCounter INIT0;
+
+CCEXTERN    volatile int VrMin INIT0;
+CCEXTERN    volatile int VrMax INIT0;
+CCEXTERN    volatile int midPoint INIT0;
+CCEXTERN    volatile int biasNew INIT0;
+
+CCEXTERN    rms_meter volt_meter_R, volt_meter_Y, volt_meter_B;
+CCEXTERN    rms_meter cur_meter_R, cur_meter_Y, cur_meter_B;
+
+CCEXTERN    rms_meter iout_meter_R, iout_meter_Y, iout_meter_B;
+CCEXTERN    rms_meter vout_meter_R, vout_meter_Y, vout_meter_B;
+CCEXTERN    rms_meter vllb_meter_R, vllb_meter_Y, vllb_meter_B;
+CCEXTERN    rms_meter vll_meter_R, vll_meter_Y, vll_meter_B;
+
+CCEXTERN    rms_meter vbyp_meter_R, vbyp_meter_Y, vbyp_meter_B;
+CCEXTERN    rms_meter kw_meter_R, kw_meter_Y, kw_meter_B;
+
+CCEXTERN    N16 _RTCSecond INIT0;
+CCEXTERN    N16 _RTCMinute INIT0;
+CCEXTERN    N16 _RTCHour INIT0;
+CCEXTERN    N16 _RTCDate INIT0;
+CCEXTERN    N16 _RTCMonth INIT0;
+CCEXTERN    N16 _RTCYear INIT0;
+
+CCEXTERN    N16 LCDMsg3 INIT0;
+CCEXTERN    N16 msg3ptr INIT0;
+
+CCEXTERN    volatile Uint16 rms_samplecount INIT0;
+CCEXTERN    volatile Uint16 rms_update_flag INIT0;
+CCEXTERN    volatile Uint16 frame_complete INIT0;
+CCEXTERN    volatile Uint16 live_frame INIT0;
+CCEXTERN    volatile Uint16 rsync INIT0;
+CCEXTERN    volatile Uint16 old_ms INIT0;
+CCEXTERN    volatile Uint16 delayCount INIT0;
+CCEXTERN    volatile Uint16 delayCount1 INIT0;
+CCEXTERN     volatile Uint16 VrOK_timer INIT0;
+CCEXTERN    volatile Uint16 VyOK_timer INIT0;
+CCEXTERN    volatile Uint16 VbOK_timer INIT0;
+CCEXTERN    volatile Uint16 preChargeOK_timer INIT0;
+CCEXTERN    volatile Uint16 InverterOK_timer INIT0;
+CCEXTERN    volatile Uint16 con1DiffOK_timer INIT0;
+
+CCEXTERN    volatile Uint16 mainsVoltageLL_timer INIT0;
+CCEXTERN    volatile Uint16 mainsVoltageHL_timer INIT0;
+CCEXTERN    volatile Uint16 VdcHighLimitTimer INIT0;
+CCEXTERN    volatile Uint16 VdcLowLimitTimer INIT0;
+CCEXTERN    volatile Uint16 PrechargeTimer INIT0;
+CCEXTERN    volatile Uint16 VGridRLowLimitTimer INIT0;
+CCEXTERN    volatile Uint16 VGridRHighLimitTimer INIT0;
+CCEXTERN    volatile Uint16 VGridYLowLimitTimer INIT0;
+CCEXTERN    volatile Uint16 VGridYHighLimitTimer INIT0;
+CCEXTERN    volatile Uint16 VGridBLowLimitTimer INIT0;
+CCEXTERN    volatile Uint16 VGridBHighLimitTimer INIT0;
+CCEXTERN    volatile Uint16 DcLinkOKtimer INIT0;
+
+CCEXTERN    volatile Uint16 status_flag INIT0;
+CCEXTERN    volatile Uint16 interchar_silent_timer INIT0;
+CCEXTERN    volatile Uint16 char_waiting INIT0;
+CCEXTERN    volatile Uint16 chars_rxd INIT0;
+CCEXTERN    volatile Uint16 address INIT0;
+CCEXTERN    volatile Uint16 msDelayCounter INIT0;
+CCEXTERN    volatile Uint16 transmitNow INIT0;
+CCEXTERN    volatile Uint16 st_addr INIT0;
+CCEXTERN    volatile Uint16 nregs INIT0;
+CCEXTERN    volatile Uint16 nBytes INIT0;
+CCEXTERN    volatile Uint16 mainLoopCount INIT0;
+
+CCEXTERN    volatile Uint16 seconds_old INIT0;
+CCEXTERN    volatile Uint16 rxChar INIT0;
+CCEXTERN    volatile Uint16 txNow INIT0;
+CCEXTERN    volatile Uint16 clearFlag INIT0;
+CCEXTERN    volatile Uint16 saveCounter INIT0;
+CCEXTERN    volatile Uint16 lastCount INIT0;
+CCEXTERN    volatile Uint16 countInterval INIT0;
+
+CCEXTERN    volatile Uint16 CANOKTimer INIT0;
+CCEXTERN    volatile Uint16 DI0timer INIT0;
+CCEXTERN    volatile Uint16 DI1timer INIT0;
+CCEXTERN    volatile Uint16 DI2timer INIT0;
+CCEXTERN    volatile Uint16 DI3timer INIT0;
 CCEXTERN    volatile Uint16 DI4timer INIT0;
 CCEXTERN    volatile Uint16 DI5timer INIT0;
 CCEXTERN    volatile Uint16 DI6timer INIT0;
@@ -276,177 +372,189 @@ CCEXTERN    volatile Uint16 DI7timer INIT0;
 CCEXTERN    volatile Uint16 DI8timer INIT0;
 CCEXTERN    volatile Uint16 DI9timer INIT0;
 CCEXTERN    volatile Uint16 DI10timer INIT0;
-CCEXTERN    volatile Uint16 DI11timer INIT0;
-CCEXTERN    volatile Uint16 DI12timer INIT0;
 
-CCEXTERN	volatile Uint16 msDelayCount INIT0;
-CCEXTERN    volatile Uint16 CycleCount INIT0;
-CCEXTERN	volatile Uint16 maxUnbalanceCurrent INIT0;
-CCEXTERN    volatile float vdcAvg INIT0;
-CCEXTERN    volatile float vAlpha INIT0;
-CCEXTERN    volatile float vR_rectified INIT0;
-CCEXTERN    volatile float vY_rectified INIT0;
-CCEXTERN    volatile float vB_rectified INIT0;
-CCEXTERN    float vOutput INIT0;
-CCEXTERN    volatile float valpha INIT0;
-CCEXTERN    volatile float vbeta INIT0;
+CCEXTERN    volatile Uint16 overLoadTimer1;
+CCEXTERN    volatile Uint16 overLoadTimer2;
+CCEXTERN    volatile Uint16 overLoadTimer3;
 
-CCEXTERN    volatile float vBeta INIT0;
-CCEXTERN     float vol_Rph INIT0;
-CCEXTERN     float vol_Yph INIT0;
-CCEXTERN     float vol_Bph INIT0;
-CCEXTERN    volatile float freqRcount INIT0;
-CCEXTERN    volatile float freqYcount INIT0;
-CCEXTERN    volatile float freqBcount INIT0;
-CCEXTERN    volatile Uint16 seqFailTimer  INIT0;
-CCEXTERN    volatile float FreqCountArray_R[16];
-CCEXTERN    volatile Uint16 fptr INIT0;
+CCEXTERN    volatile Uint16 rtcReadTimer INIT0;
+CCEXTERN    volatile Uint16 msDelayCount INIT0;
+CCEXTERN    volatile Uint16 magicID INIT0;
+CCEXTERN    volatile Uint16 msgRefreshTimer INIT0;
+CCEXTERN    volatile Uint16 DisplayRefreshTimer INIT0;
 
-CCEXTERN	float minVref INIT0;
-CCEXTERN    float minIref INIT0;
+CCEXTERN    volatile Uint16 softCounter INIT0;
+CCEXTERN    volatile Uint16 maxUnbalanceCurrent INIT0;
+CCEXTERN    float32_t ref_inc;
+CCEXTERN    float32_t ref_inc1;
 
+CCEXTERN    volatile float32_t    voutR_dc INIT0;
+CCEXTERN    volatile float32_t    voutY_dc INIT0;
+CCEXTERN    volatile float32_t    voutB_dc INIT0;
+CCEXTERN    volatile float32_t    Vout_Ref INIT0;
+CCEXTERN    volatile float32_t    newDT INIT0;
+CCEXTERN    volatile float32_t    soft_VoutRef INIT0;
+CCEXTERN    volatile float32_t    pll_omegaN INIT0;
+CCEXTERN    volatile float32_t    pll_omegaR INIT0;
+CCEXTERN    volatile float32_t    pll_omega INIT0;
+CCEXTERN    volatile float32_t    omega_inv INIT0;
+CCEXTERN    volatile float32_t    rms_sum_voltage_R INIT0;
+CCEXTERN    volatile float32_t    rms_sum_voltage_Y INIT0;
+CCEXTERN    volatile float32_t    rms_sum_voltage_B INIT0;
+CCEXTERN    volatile float32_t    rms_sum_gridcur_R INIT0;
+CCEXTERN    volatile float32_t    rms_sum_gridcur_Y INIT0;
+CCEXTERN    volatile float32_t    rms_sum_gridcur_B INIT0;
+CCEXTERN    volatile float32_t    rms_sum_invcur_R INIT0;
+CCEXTERN    volatile float32_t    rms_sum_invcur_Y INIT0;
+CCEXTERN    volatile float32_t    rms_sum_invcur_B INIT0;
 
-CCEXTERN   volatile N16 samplingCount_tmp INIT0;
-//CCEXTERN   volatile N16 samplingCount INIT0;
+CCEXTERN    volatile float32_t    omega INIT0;
 
-//CCEXTERN    float idc2CycleSum INIT0;
-//CCEXTERN    float ibatCycleSum INIT0;
-CCEXTERN    float vdcCycleSum INIT0;
-//
-//CCEXTERN    float vdcCycleFbk INIT0;
-//CCEXTERN    float idc1CycleFbk INIT0;
-//CCEXTERN    float idc2CycleFbk INIT0;
-//CCEXTERN    float idcCycleFbk INIT0;
-//CCEXTERN    float ibatCycleFbk INIT0;
+CCEXTERN    volatile float32_t    kw_sum_R INIT0;
+CCEXTERN    volatile float32_t    kw_sum_Y INIT0;
+CCEXTERN    volatile float32_t    kw_sum_B INIT0;
+CCEXTERN    volatile float32_t pll_d INIT0;
+CCEXTERN    volatile float32_t pll_q INIT0;
+CCEXTERN    volatile float32_t pll_zero INIT0;
+CCEXTERN    volatile float32_t pll_de INIT0;
+CCEXTERN    volatile float32_t pll_qe INIT0;
+CCEXTERN    volatile N16 toggle INIT0;
 
-CCEXTERN    float LowValue INIT0;
-CCEXTERN    float LowDelay INIT0;
-CCEXTERN    volatile Uint16 nBytes INIT0;
-CCEXTERN    volatile Uint16    zcdptr INIT0;
+CCEXTERN    float32_t *waveptr;
 
-CCEXTERN	float *waveptr;
+CCEXTERN    volatile float32_t    prev_vdcin INIT0;
+CCEXTERN    char    dispString[21];
+CCEXTERN    char UnitSerial[20] INITARRAY0;
+CCEXTERN    N16 ReferenceChangedFlag INIT0;
+CCEXTERN    N16 specialCommnad INIT0;
+CCEXTERN    N16 eventCount INIT0;
+CCEXTERN    N16 errorRx INIT0;
 
-CCEXTERN	char UnitSerial[20] INITARRAY0;
-CCEXTERN	N16 specialCommnad INIT0;
-CCEXTERN	N16 eventCount INIT0;
-
-CCEXTERN	N16 AlarmFlag1_old INIT0;
-CCEXTERN	N16 AlarmFlag2_old INIT0;
-CCEXTERN	N16 AlarmFlag3_old INIT0;
+CCEXTERN    N16 AlarmFlag1_old INIT0;
+CCEXTERN    N16 AlarmFlag2_old INIT0;
+CCEXTERN    N16 AlarmFlag3_old INIT0;
 CCEXTERN    N16 AlarmFlag4_old INIT0;
-CCEXTERN    N16 softcounter INIT0;
-CCEXTERN    N16 prevCountR INIT0;
-CCEXTERN    N16 prevCountY INIT0;
-CCEXTERN    N16 prevCountB INIT0;
-
-CCEXTERN    volatile Uint16 dataLogTimer INIT0;
-CCEXTERN    volatile Uint16 dataLog INIT0;
-CCEXTERN    volatile Uint16 LastWriteTimer INIT0;
-CCEXTERN    eventPacket Events[4];
-CCEXTERN    eventPacket EventTX;
-
-CCEXTERN	volatile N16	snap_start INIT0;
-CCEXTERN	volatile N16	snap_end INIT0;
-CCEXTERN	volatile N16 snap_ptr INIT0;
-CCEXTERN    volatile N16 updateLED INIT0;
-CCEXTERN	Uint16 mainLoopCount_prev INIT0;
-
-CCEXTERN    Uint16 equalizeTimer INIT0;
-CCEXTERN    Uint16 IbatEqRelease INIT0;
-CCEXTERN    Uint16 eqReleaseTimer INIT0;
-CCEXTERN    Uint16 transferCount INIT0;
-CCEXTERN    Uint16 boostReleaseCount INIT0;
-CCEXTERN    Uint16 BattTestTimer INIT0;
+CCEXTERN    N16 AlarmFlag5_old INIT0;
+CCEXTERN    N16 samplesPerCycle INIT0;
 
 
-CCEXTERN	Uint16 Error INIT0;
-CCEXTERN	SYSMODE SystemFlag;
-CCEXTERN    SYSMODE SystemFlag_Rem;
-CCEXTERN	LMTMODE LimitFlag;
+CCEXTERN    N16 rtcUpdate  INIT0;
+
+CCEXTERN  volatile N16    nPoints INIT0;
+CCEXTERN    volatile N16    snap_start INIT0;
+CCEXTERN    volatile N16    snap_end INIT0;
+CCEXTERN    volatile N16 snap_ptr INIT0;
+CCEXTERN    volatile N16 tmp_canRxCounter INIT0;
+
+
+CCEXTERN    Uint16 Sector INIT0;  // Sector is treated as Q0 - independently with global Q
+CCEXTERN    Uint16 zcdptr INIT0;
+CCEXTERN    Uint16 FirstTime INIT0;
+
+CCEXTERN    Uint16 mainLoopCount_prev INIT0;
+CCEXTERN    Uint16 period INIT0;
+CCEXTERN    Uint16 mainsFailTimer INIT0;
+CCEXTERN    Uint16 vacHighFault INIT0;
+CCEXTERN    Uint16 vachighTripCount INIT0;
+CCEXTERN    Uint16 CANOKtimer INIT0;
+CCEXTERN    Uint16 CANReset INIT0;
+//CCEXTERN    Uint16 vachighTripCount INIT0;
+
+CCEXTERN    volatile float32_t DMinVal INIT0;
+CCEXTERN    volatile float32_t QMaxVal INIT0;
+CCEXTERN    volatile float32_t qRef INIT0;
+
+CCEXTERN    Uint16 Error INIT0;
+CCEXTERN    SYSMODE SystemFlag;
+CCEXTERN    LMTMODE LimitFlag;
 CCEXTERN    OKMODE  SysOkFlag;
-CCEXTERN    BATMODE BattFlag;
+CCEXTERN    LMTMODE1 LimitFlagInv;
+CCEXTERN    PARSTAT  UPSFlag;
+CCEXTERN    PARSTAT  PairStatusFlag;
+CCEXTERN    COMMMODE CommStatus;
 
+CCEXTERN    sincos theta_inv;
+CCEXTERN    sincos theta_inv1s;
 
-CCEXTERN    N16 DIpins[16];
-CCEXTERN    N16 DOpins[16];
-CCEXTERN    sincos pll_theta;
-CCEXTERN	float *waveptr;
+#ifdef SHIFTED_FBACK
+    CCEXTERN    sincos theta_fb;
+    CCEXTERN    sincos theta_fb_120;
+    CCEXTERN    sincos theta_fb_240;
+#else
+    CCEXTERN    sincos theta_inv_120;
+    CCEXTERN    sincos theta_inv_240;
+#endif
 
-CCEXTERN    volatile N16    doPID INIT0;
-CCEXTERN    volatile N16    capcntr INIT0;
-CCEXTERN    volatile N16    Blinkflag INIT0;
-CCEXTERN    volatile N16    LedFlag_old INIT0;
-CCEXTERN    volatile N16    countPtr INIT0;
-CCEXTERN    volatile Uint16 OffsetNotDone INIT0;
-CCEXTERN    volatile Uint16 ShiftedFlag INIT0;
+CCEXTERN    float32_t inverterFailLevel   INIT0;
+CCEXTERN    float32_t bypassFailLevel   INIT0;
+CCEXTERN    volatile float32_t    sin_val_old INIT0;
 
-CCEXTERN    volatile long offsets[20] INITARRAY0;
+CCEXTERN    float32_t *waveptr;
+CCEXTERN    volatile float32_t    bypSin INIT0;
+CCEXTERN    volatile float32_t    bypCos INIT0;
+CCEXTERN    volatile float32_t    Cur_Alpha INIT0;
+CCEXTERN    volatile float32_t    Cur_Beta INIT0;
+CCEXTERN    volatile float32_t    Cur_neg_Alpha INIT0;
+CCEXTERN    volatile float32_t    Cur_neg_Beta INIT0;
 
-CCEXTERN    LPF lpf_vInpR, lpf_vInpY, lpf_vInpB;
-CCEXTERN    LPF lpf_iInpR, lpf_iInpY, lpf_iInpB;
-CCEXTERN    LPF lpf_vdc, lpf_vload, lpf_idc1, lpf_idc2, lpf_ibat;
+CCEXTERN    volatile float32_t stat_current_zero INIT0;
+CCEXTERN    volatile float32_t stat_current_d INIT0;
+CCEXTERN    volatile float32_t stat_current_q INIT0;
+CCEXTERN    volatile float32_t soft_VdRef INIT0;
+CCEXTERN    volatile float32_t soft_VqRef INIT0;
+CCEXTERN    volatile float32_t deSoftRef INIT0;
 
-CCEXTERN    LPF lpf_vload;
-CCEXTERN    LPF lpf_vbat;
-CCEXTERN    LPF lpf_bias;
-CCEXTERN    LPF lpf_vref;
-CCEXTERN    LPF lpf_iref;
-CCEXTERN    LPF lpf_temp1;
-CCEXTERN    LPF lpf_temp2;
-CCEXTERN    LPF lpf_temp3;      // ambient (Common Controller v2, B1)
-CCEXTERN    LPF lpf_ifback;
-CCEXTERN    LPF lpf_ibatfback;
-CCEXTERN    LPF lpf_remVref;
-CCEXTERN    LPF lpf_pid;
+CCEXTERN    volatile float32_t    volRef_Iq   INIT0;
+CCEXTERN    volatile float32_t    volRef_Id   INIT0;
+CCEXTERN    volatile float32_t    defaultOmega   INIT0;
+CCEXTERN    volatile float32_t    addOn   INIT0;
 
-CCEXTERN    rms_meter vdcRipple_meter;
-CCEXTERN    rms_meter volt_meter_R, volt_meter_Y, volt_meter_B;
-CCEXTERN    rms_meter cur_meter_R, cur_meter_Y, cur_meter_B;
-CCEXTERN    rms_meter kw_meter_R, kw_meter_Y, kw_meter_B;
-CCEXTERN    rms_meter vll_meter_R, vll_meter_Y, vll_meter_B;
+CCEXTERN    volatile float32_t    vbeta_bypass   INIT0;
 
+CCEXTERN    VolControl vcontrol;
+CCEXTERN    pllBlock  pllBypass;
 
-CCEXTERN    PI_CONTROLLER  pid_vdc;
-CCEXTERN    PI_CONTROLLER  pid_idc;
-CCEXTERN    PI_CONTROLLER  pid_idc1;
-CCEXTERN    PI_CONTROLLER  pid_idc2;
-CCEXTERN    PI_CONTROLLER  pid_ibat;
-CCEXTERN    PI_CONTROLLER  pid_iac;
-/*
-CCEXTERN    PID_GRANDO_F_CONTROLLER  pid_vdc;
-CCEXTERN    PID_GRANDO_F_CONTROLLER  pid_idc;
-CCEXTERN    PID_GRANDO_F_CONTROLLER  pid_idc1;
-CCEXTERN    PID_GRANDO_F_CONTROLLER  pid_idc2;
-CCEXTERN    PID_GRANDO_F_CONTROLLER  pid_ibat;
-CCEXTERN    PID_GRANDO_F_CONTROLLER  pid_iac;
-*/
-CCEXTERN    volatile long    FreqHiCount INIT0;
-CCEXTERN    volatile long    FreqLoCount INIT0;
+CCEXTERN PIreg pi_vbat;
+CCEXTERN PIreg pi_ibat;
 
-CCEXTERN    LPF32 lpf32_idc1, lpf32_idc2, lpf32_ibat;
-CCEXTERN    LPF32 lpf8_idc1, lpf8_idc2;
+CCEXTERN    MIN_MAX chkFrequency;
+CCEXTERN    MIN_MAX chkVr;
+CCEXTERN    MIN_MAX chkVy;
+CCEXTERN    MIN_MAX chkVb;
+CCEXTERN    MIN_MAX chkIr1;
+CCEXTERN    MIN_MAX chkIy1;
+CCEXTERN    MIN_MAX chkIb1;
 
-CCEXTERN    LPF32 lpf32_vry,lpf32_vyb, lpf32_vbr, lpf32_vripple;
-CCEXTERN    LPF32 lpf32_vr,lpf32_vy, lpf32_vb;
-CCEXTERN    LPF32 lpf32_ir,lpf32_iy, lpf32_ib, lpf32_freq;
-CCEXTERN    LPF32 lpf32_vdc, lpf32_vbat,lpf32_vload;
-CCEXTERN    pllBlock  pllGrid;
+CCEXTERN    MIN_MAX chkIr2;
+CCEXTERN    MIN_MAX chkIy2;
+CCEXTERN    MIN_MAX chkIb2;
 
-CCEXTERN    volatile int    GridFrequencyLL INIT0;
-CCEXTERN    volatile int    GridFrequencyHL INIT0;
-CCEXTERN    volatile int    GrdFrqncyL_HL_delay INIT0;
-CCEXTERN    volatile int    piCounter INIT0;
+CCEXTERN    MIN_MAX chkIr3;
+CCEXTERN    MIN_MAX chkIy3;
+CCEXTERN    MIN_MAX chkIb3;
 
+CCEXTERN    MIN_MAX chkVbypr;
+CCEXTERN    MIN_MAX chkVbypy;
+CCEXTERN    MIN_MAX chkVbypb;
 
-CCEXTERN    volatile float    vdcReference INIT0;
-CCEXTERN    volatile float    idcReference INIT0;
-CCEXTERN    volatile float    ibatReference INIT0;
-CCEXTERN    volatile float    iacRef INIT0;
+CCEXTERN    MIN_MAX chkIbat;
+CCEXTERN    MIN_MAX chkVbat;
+CCEXTERN    MIN_MAX chkVbatpre;
+CCEXTERN    MIN_MAX chkdcLink;
+CCEXTERN    PR_STATE prF[2];                 // fundamental resonator, alpha/beta
+CCEXTERN    PR_STATE prH[PR_NHARM][2];       // harmonic resonators, alpha/beta
+CCEXTERN    PR_COEF  prCoefF;
+CCEXTERN    PR_COEF  prCoefH[PR_NHARM];
+CCEXTERN    float32_t prKF;                  // fundamental resonant gain (2*inv_ki)
+CCEXTERN    float32_t prKH;                  // harmonic resonant gain
+CCEXTERN    float32_t prWd;                  // resonator damping 2*wc*Ts
+CCEXTERN    float32_t prRotC, prRotS;        // cos/sin of feedback rotation (Angle30)
+CCEXTERN    Uint16    prHMask;
+
 
 CCEXTERN    MCAN_RxBufElement rxMsg[1];
 CCEXTERN    MCAN_RxBufElement rxMsg1;
 CCEXTERN    MCAN_TxBufElement txMsg[1];
 CCEXTERN    MCAN_RxFIFOStatus RxFS;
 
-
-#endif //__CCVARIABLESH__
+#endif //__CCVARIABLES__

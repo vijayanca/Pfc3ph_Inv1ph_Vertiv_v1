@@ -8,17 +8,10 @@
 #ifndef CONTROLMACROS_H_
 #define CONTROLMACROS_H_
 
-#define MAX3(a, b, c)  ((a > b) ? ((a > c) ? a : c) : ((b > c) ? b : c))
 
 #define checkLimitHN(var,lmt,dly,tmr)    \
     if(var>lmt) { if(tmr<dly) tmr++; } \
     else if(tmr) tmr--;  \
-    if(tmr>dly) tmr=dly; \
-    Nop()
-
-#define checkLimitLN(var,lmt,dly,tmr)    \
-    if(var<lmt) { if(tmr<dly) tmr++; } \
-    else if( (var > lmt) && tmr) tmr--;   \
     if(tmr>dly) tmr=dly; \
     Nop()
 
@@ -46,17 +39,12 @@
     if(tmr>dly) tmr=dly; \
     Nop()
 
-#define UpdateBit(dly,tmr,bit)  \
+#define updateBit(dly,tmr,bit)  \
     if(tmr==dly) bit = TRUE;    \
     else if(tmr==0) bit = FALSE
 
 #define checkDI_ANALOG(b,t,d)   \
         if (b>2000) { if (t < d) t++;   } \
-        else {  if (t) t--;     } \
-        Nop()
-
-#define checkDI_ANALOG_NO(b,t,d)   \
-        if (b<2000) { if (t < d) t++;   } \
         else {  if (t) t--;     } \
         Nop()
 
@@ -70,10 +58,13 @@
     beta  = 0.57735026913 * (y - b);          \
     z     = 0.33333333333*(r + y + b)
 
-#define CLARKE_F_MACRO(alpha,beta,z,r,y,b)                                   \
-    alpha=((0.66666666667)*(r - ((0.5)*(y+b))));    \
-    beta =((0.57735026913)*(y - b));                  \
-    z =((0.33333333333)*(r + y + b))
+#define AB2DQN_F(d,q,a,b,s)   \
+    d =  -a*s.sin_val - b*s.cos_val;  \
+    q = a*s.cos_val - b*s.sin_val
+
+#define DQ2ABN_F(a,b,d,q,s)        \
+    a =  -d*s.sin_val + q*s.cos_val;\
+    b =  -q*s.sin_val - d*s.cos_val
 
 #define AB2DQ_F(d,q,a,b,s)   \
     d =  a*s.sin_val - b*s.cos_val;  \
@@ -81,24 +72,22 @@
 
 #define DQ2AB_F(a,b,d,q,s)        \
     a =  d*s.sin_val + q*s.cos_val;\
-    b =  q*s.sin_val - d*s.cos_val;\
+    b =  q*s.sin_val - d*s.cos_val
 
 #define AB2RYB_F(a,b,c,alpha,beta)        \
     a = alpha;                           \
     b = -0.5*alpha + 0.86602540378*beta; \
     c = -0.5*alpha - 0.86602540378*beta
 
-#define CLARKE_LINEV_MACRO(alpha,beta,vr,vy) \
+#define CLARKE_LINEV_MACRO_old(alpha,beta,vr,vy) \
     alpha =  vr*0.66666666667 + vy*0.3333333333; \
-    beta  =  vy*0.577350269
+    beta  =  vy*-0.577350269
 
-#define CLARKE_LINE_MACRO(alpha,beta,vr,vy) \
+#define CLARKE_LINEV_MACRO_old1(alpha,beta,vr,vy) \
     alpha =  vr*1.154700538 + vy*0.577350269; \
     beta  =  -vy
 
-//#define CLARKE_LINE_MACRO(alpha,beta,vr,vy) \
-//    alpha = alpha * TWO3 + vy * ONE3; \
-//    beta  = beta * -0.577350269
+
 
 //--------------------------------------------------------------------------
 //  Macro HARMONICOSCILLATOR : Implementation of a PI Regulator
@@ -142,48 +131,16 @@
 
 
 //---------STATIC SWITCH CONTROL----------------
+// Common Controller v2: one gate pulse train per source on EPWM7
+// (StaticSwitchDrivesInit, pwm.c); the static switch board fires all three phases.
+//   EPWM7A -> STAT_INV (GPIO12), EPWM7B -> STAT_BYP (GPIO13), via U33 -> CON24
 #define STATIC_DRIVES_OFF()    \
-        EPwm1Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm1Regs.AQCTLB.bit.CBD = AQ_CLEAR;    \
-        EPwm2Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm2Regs.AQCTLB.bit.CBD = AQ_CLEAR;    \
-        EPwm3Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm3Regs.AQCTLB.bit.CBD = AQ_CLEAR;    \
-        EPwm4Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm4Regs.AQCTLB.bit.CBD = AQ_CLEAR;    \
-        EPwm5Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm5Regs.AQCTLB.bit.CBD = AQ_CLEAR;    \
-        EPwm6Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm6Regs.AQCTLB.bit.CBD = AQ_CLEAR
+        EPwm7Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
+        EPwm7Regs.AQCTLB.bit.CBD = AQ_CLEAR
 
-#define EnableInvSSR()  EPwm4Regs.AQCTLA.bit.CAD = AQ_SET
-#define EnableInvSSY()  EPwm4Regs.AQCTLB.bit.CBD = AQ_SET
-#define EnableInvSSB()  EPwm5Regs.AQCTLA.bit.CAD = AQ_SET
-
-#define EnableBypSSR()  EPwm5Regs.AQCTLB.bit.CBD = AQ_SET
-#define EnableBypSSY()  EPwm6Regs.AQCTLA.bit.CAD = AQ_SET
-#define EnableBypSSB()  EPwm6Regs.AQCTLB.bit.CBD = AQ_SET
-
-#define DisableInvSSR()  EPwm4Regs.AQCTLA.bit.CAD = AQ_CLEAR
-#define DisableInvSSY()  EPwm4Regs.AQCTLB.bit.CBD = AQ_CLEAR
-#define DisableInvSSB()  EPwm5Regs.AQCTLA.bit.CAD = AQ_CLEAR
-
-#define DisableBypSSR()  EPwm5Regs.AQCTLB.bit.CBD = AQ_CLEAR
-#define DisableBypSSY()  EPwm6Regs.AQCTLA.bit.CAD = AQ_CLEAR
-#define DisableBypSSB()  EPwm6Regs.AQCTLB.bit.CBD = AQ_CLEAR
-
-#define EnableInvSS() EnableInvSSR(); \
-                       EnableInvSSY(); \
-                       EnableInvSSB()
-#define EnableBypSS() EnableBypSSR(); \
-                       EnableBypSSY(); \
-                       EnableBypSSB()
-
-#define DisableInvSS() DisableInvSSR(); \
-                       DisableInvSSY(); \
-                       DisableInvSSB()
-#define DisableBypSS() DisableBypSSR(); \
-                       DisableBypSSY(); \
-                       DisableBypSSB()
+#define EnableInvSS()   EPwm7Regs.AQCTLA.bit.CAD = AQ_SET
+#define DisableInvSS()  EPwm7Regs.AQCTLA.bit.CAD = AQ_CLEAR
+#define EnableBypSS()   EPwm7Regs.AQCTLB.bit.CBD = AQ_SET
+#define DisableBypSS()  EPwm7Regs.AQCTLB.bit.CBD = AQ_CLEAR
 
 #endif /* CONTROLMACROS_H_ */

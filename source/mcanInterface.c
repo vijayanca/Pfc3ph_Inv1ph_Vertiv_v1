@@ -73,60 +73,61 @@ int32_t loopCnt = 0U;
 N16 startAddr1 = 0;
 N16 pktNumber = 0;
 
-void    MCAN_Transmit(unsigned int Id, unsigned int bufID)
+/*------------------------------------------------------------------------------
+ Inverter paralleling on CAN-B (MCANB), classic CAN, 11-bit ID, DLC 8,
+ two 32-bit words little-endian (bytes 0-3 = v1, bytes 4-7 = v2):
+   ID 2  master -> slave : v1 = Angle (float), v2 = omega_inv (float)
+   ID 3  master -> slave : v1 = AlarmFlag2 << 16 | UPSFlag, v2 = cur.lpf_de.y (float)
+   ID 15 slave -> master : v1 = AlarmFlag2 << 16 | UPSFlag, v2 = cur.lpf_de.y (float)
+ Sent from AdcISR (SendCANPackets, interrupt.c) on TX buffer 0.
+------------------------------------------------------------------------------*/
+static MCAN_TxBufElement parMsg;
+
+// Queue one paralleling frame. Returns 0 (frame dropped) if the previous one is
+// still pending, so the ADC ISR never waits on the bus.
+N16 ParTransmit(N16 id, long v1, long v2)
 {
-        txMsg[0].id       = (uint32_t)Id << 18;
-        MCAN_writeMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_BUF, bufID,&txMsg[bufID]);
-        MCAN_txBufAddReq(PAR_CAN_BASE, 0U);
+    if(MCAN_getTxBufReqPend(PAR_CAN_BASE) & 1UL) return 0;
+
+    parMsg.data[0] = (v1 >> 0)  & 0xff;
+    parMsg.data[1] = (v1 >> 8)  & 0xff;
+    parMsg.data[2] = (v1 >> 16) & 0xff;
+    parMsg.data[3] = (v1 >> 24) & 0xff;
+    parMsg.data[4] = (v2 >> 0)  & 0xff;
+    parMsg.data[5] = (v2 >> 8)  & 0xff;
+    parMsg.data[6] = (v2 >> 16) & 0xff;
+    parMsg.data[7] = (v2 >> 24) & 0xff;
+
+    parMsg.id  = (uint32_t)id << 18;
+    parMsg.rtr = 0U; parMsg.xtd = 0U; parMsg.esi = 0U;
+    parMsg.dlc = 8U; parMsg.brs = 0U; parMsg.fdf = 0U;
+    parMsg.efc = 0U; parMsg.mm  = 0U;
+
+    MCAN_writeMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_BUF, 0U, &parMsg);
+    MCAN_txBufAddReq(PAR_CAN_BASE, 0U);
+    return 1;
 }
-N16 canID = 0;
+
+// TRUE if either CAN module is bus-off (main loop then re-initialises)
+N16 MCANBusOff(void)
+{
+    MCAN_ProtocolStatus ps;
+
+    MCAN_getProtocolStatus(MCANA_DRIVER_BASE, &ps);
+    if(ps.busOffStatus) return TRUE;
+    MCAN_getProtocolStatus(MCANB_DRIVER_BASE, &ps);
+    if(ps.busOffStatus) return TRUE;
+    return FALSE;
+}
+
 void    MCANBusProcessing(void)
 {
-    long val1 = 0;
-    long val2 = 0;
-    long *nptr = 0;
-
    if(poweronTimer < 1000) return;
 
-/********************************************************************************/
-
-       if( (milliseconds - oldmsCount1)> CAN_TxInterval)
-        {
-           if(canTxPakcetCount1)
-           {
-              val1 = (long) SystemFlag.all;
-              nptr = (long *) &idc_fback;
-              val2 = *nptr;
-           }
-           else
-           {
-              nptr = (long *) &ibat_fback;
-              val1 = *nptr;
-              nptr = (long *) &vdc_ref;
-              val2 = *nptr;
-           }
-
-                txMsg[0].data[0] = (val1 >> 0)  & 0xff;
-                txMsg[0].data[1] = (val1 >> 8)  & 0xff;
-                txMsg[0].data[2] = (val1 >> 16) & 0xff;
-                txMsg[0].data[3] = (val1 >> 24) & 0xff;
-                txMsg[0].data[4] = (val2 >> 0) & 0xff;
-                txMsg[0].data[5] = (val2 >> 8) & 0xff;
-                txMsg[0].data[6] = (val2 >> 16) & 0xff;
-                txMsg[0].data[7] = (val2 >> 24) & 0xff;
-
-                canID = DataAddr + canTxPakcetCount1;
-                MCAN_Transmit(canID,0);
-
-                canTxPakcetCount1++;
-                if(canTxPakcetCount1==2)    canTxPakcetCount1 = 0;
-
-                oldmsCount1 = milliseconds;
-          }
-
-       DisplayBroadcast();
-       DisplayWriteProcessing();
-      }
+   // CAN-B paralleling frames are sent from AdcISR (SendCANPackets)
+   DisplayBroadcast();
+   DisplayWriteProcessing();
+}
 
 /*------------------------------------------------------------------------------
  Display unit on CAN-A
@@ -284,13 +285,22 @@ void DisplayWriteProcessing(void)
 
     dispWrPending = 0;
 }
-long val1 = 0, val2 = 0;
+// little-endian 32-bit word from rx.data[n..n+3]
+static long parWord(const MCAN_RxBufElement *m, N16 n)
+{
+    long lo = ((long)(m->data[n + 1] & 0xff) << 8) | (m->data[n] & 0xff);
+    long hi = ((long)(m->data[n + 3] & 0xff) << 8) | (m->data[n + 2] & 0xff);
+    return lo | (hi << 16);
+}
+
 __interrupt void MCANIntr1ISR(void)
 {
     uint32_t intrStatus;
-
-    float *fptr;
- //   N16 n1 = 0;
+    MCAN_RxBufElement rx;
+    MCAN_RxFIFOStatus fs;
+    long w;
+    float v1;
+    N16 id;
 
     // Paralleling RX: CAN-B, interrupt line 1 (PIE 9.10 MCANB_1)
     intrStatus = MCAN_getIntrStatus(PAR_CAN_BASE);
@@ -299,46 +309,48 @@ __interrupt void MCANIntr1ISR(void)
 
     if((MCAN_INTR_SRC_RX_FIFO1_NEW_MSG & intrStatus) == MCAN_INTR_SRC_RX_FIFO1_NEW_MSG)
     {
-        MCAN_readMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_FIFO, 0U,
-                            MCAN_RX_FIFO_NUM_1, &rxMsg1);
+        fs.num = MCAN_RX_FIFO_NUM_1;
+        MCAN_getRxFIFOStatus(PAR_CAN_BASE, &fs);
+        MCAN_readMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_FIFO, 0U, MCAN_RX_FIFO_NUM_1, &rx);
+        MCAN_writeRxFIFOAck(PAR_CAN_BASE, MCAN_RX_FIFO_NUM_1, fs.getIdx);
 
-        rxMsg[loopCnt] = rxMsg1;
-        RxFS.num = MCAN_RX_FIFO_NUM_1;
-        CanID = rxMsg1.id >> 18;
+        id = (N16)(rx.id >> 18);
+        CANOKtimer = 10;
 
-        MCAN_writeRxFIFOAck(PAR_CAN_BASE, MCAN_RX_FIFO_NUM_1,
-                            RxFS.getIdx);
-
-        if(CanID == PidAddr1) //from Other Unit
+        if((id == 0x0002) && !SystemFlag.bit.POWERINGUP)    // from master: angle, omega
         {
-            val1 = rxMsg1.data[1];val1 <<= 8; val1 |= rxMsg1.data[0];
-            val2 = rxMsg1.data[3];val2 <<= 8; val2 |= rxMsg1.data[2];
-            val1 = val1 | (val2 << 16);
-            fptr = (float*) &val1;
-            ibat_fback_remote   = *fptr;
+            MasterPresentTimer = 1000;
 
-            val1 = rxMsg1.data[5];val1 <<= 8; val1 |= rxMsg1.data[4];
-            val2 = rxMsg1.data[7];val2 <<= 8; val2 |= rxMsg1.data[6];
-            val1 = val1 | (val2 << 16);
-            fptr = (float*) &val1;
-            vol_ref_remote = *fptr;
+            w = parWord(&rx, 0);
+            v1 = *(float *) &w;
+            if((v1 >= 0) && (v1 < 6.8)) remoteAngle = v1;
+
+            w = parWord(&rx, 4);
+            v1 = *(float *) &w;
+            if((v1 >= PLL_LOCK_MIN) && (v1 < PLL_LOCK_MAX)) remoteOmega = v1;
         }
 
-        if(CanID == PidAddr2) //from Other Unit
+        if((id == 0x0003) && (Master == 0))                 // from master: status, Id current
         {
-            val1 = rxMsg1.data[1];val1 <<= 8; val1 |= rxMsg1.data[0];
-            val2 = rxMsg1.data[3];val2 <<= 8; val2 |= rxMsg1.data[2];
-            SystemFlag_Rem.all = val1;
+            w = parWord(&rx, 0);
+            masterAlarmFlag1 = (N16)(w & 0xffff);
+            masterAlarmFlag2 = (N16)((w >> 16) & 0xffff);
+            PairStatusFlag.all = masterAlarmFlag1;
 
-            val1 = rxMsg1.data[5];val1 <<= 8; val1 |= rxMsg1.data[4];
-            val2 = rxMsg1.data[7];val2 <<= 8; val2 |= rxMsg1.data[6];
-            val1 = val1 | (val2 << 16);
-            fptr = (float*) &val1;
-            cur_fback_remote = *fptr;
-            canFailureCount = 0;
+            w = parWord(&rx, 4);
+            remoteIref = *(float *) &w;
         }
 
-  }
+        if((id == 0x000f) && Master)                        // from slave: status
+        {
+            w = parWord(&rx, 0);
+            masterAlarmFlag1 = (N16)(w & 0xffff);
+            masterAlarmFlag2 = (N16)((w >> 16) & 0xffff);
+            PairStatusFlag.all = masterAlarmFlag1;
+        }
+
+        tmp_canRxCounter++;
+    }
 
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP9;
 }

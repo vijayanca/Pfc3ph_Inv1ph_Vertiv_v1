@@ -14,8 +14,11 @@ MEMORY
 /*   RAMLS5           : origin = 0x00A800, length = 0x000800
    RAMLS6           : origin = 0x00B000, length = 0x000800
    RAMLS7           : origin = 0x00B800, length = 0x000800*/
-   RAMLS8           : origin = 0x014000, length = 0x002000  // When configured as CLA program use the address 0x4000
-   RAMLS9           : origin = 0x016000, length = 0x002000  // When configured as CLA program use the address 0x6000
+   // RAMLS8 + RAMLS9 (contiguous) as one block for .TI.ramfunc: the inverter's
+   // control ISRs run from RAM and need more than one 8K-word LS block
+   RAMLS89          : origin = 0x014000, length = 0x004000
+//   RAMLS8           : origin = 0x014000, length = 0x002000  // When configured as CLA program use the address 0x4000
+//   RAMLS9           : origin = 0x016000, length = 0x002000  // When configured as CLA program use the address 0x6000
 
    // RAMLS8_CLA    : origin = 0x004000, length = 0x002000  // Use only if configured as CLA program memory
    // RAMLS9_CLA    : origin = 0x006000, length = 0x002000  // Use only if configured as CLA program memory
@@ -71,7 +74,7 @@ SECTIONS
 
    #if defined(__TI_EABI__)
        .TI.ramfunc : {} LOAD = FLASH_BANK3,
-                        RUN = RAMLS8,
+                        RUN = RAMLS89,
                         LOAD_START(RamfuncsLoadStart),
                         LOAD_SIZE(RamfuncsLoadSize),
                         LOAD_END(RamfuncsLoadEnd),

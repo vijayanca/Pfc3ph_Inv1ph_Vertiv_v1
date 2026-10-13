@@ -12,364 +12,928 @@
 #include "../ccVariables.h"
 #include "inc/hw_memmap.h"
 #include "sci.h"
-extern pllBlock  pllGrid;
-#include "ecap.h"
+#include "../include/CNTL_PI_F.h"
+
+extern pllBlock  pllBypass;
+volatile float current_zero = 0;
+volatile float current_d = 0;
+volatile float current_q = 0;
+volatile float prevSin = 0;
+long  adcStart_Timer = 0;
+
+volatile int Dac1val = 0, Dac2val = 0;
+volatile N16 invfCount = 0;
+volatile N16 invokcounter = 0;
+volatile N16 syncTimer = 0;
+long val1 = 0;
+long val2 = 0;
+long *nptr = 0;
+long *nptr1 = 0;
+int  canTx = 0;
+
+N16 volatile canIntrval = 0;
+N16 Id = 0;
+
 
 #ifdef _FLASH
-    #pragma CODE_SECTION(cpu_timer2_isr, ".TI.ramfunc");
-    #pragma CODE_SECTION(ecap1ISR, ".TI.ramfunc");
-    #pragma CODE_SECTION(SCIARx_ISR, ".TI.ramfunc");
-    #pragma CODE_SECTION(SCIBRx_ISR, ".TI.ramfunc");
+#pragma CODE_SECTION(cpu_timer0_isr, ".TI.ramfunc");
+#pragma CODE_SECTION(cpu_timer1_isr, ".TI.ramfunc");
+#pragma CODE_SECTION(cpu_timer2_isr, ".TI.ramfunc");
+#pragma CODE_SECTION(SCIRxISR, ".TI.ramfunc");
+#pragma CODE_SECTION(AdcISR, ".TI.ramfunc");
+#pragma CODE_SECTION(CurrentModeSelection, ".TI.ramfunc");
+#pragma CODE_SECTION(pll_and_sincos, ".TI.ramfunc");
+#pragma CODE_SECTION(SendCANPackets, ".TI.ramfunc");
+#pragma CODE_SECTION(rmsCal, ".TI.ramfunc");
+#pragma CODE_SECTION(getReferenceVoltage, ".TI.ramfunc");
+#pragma CODE_SECTION(getReferenceCurrent, ".TI.ramfunc");
 #endif
 
-#include "../CosTable.h"
-volatile int MasterRunning_old = 0;
-float _vdcsum = 0, _idc1sum = 0,_idc2sum = 0, _ibatsum = 0;
+inline void getReferenceCurrent(void);
 
-int volatile diff1 = 0;
-int volatile diff2 = 0;
+// Preload fundamental resonator with the current-mode output (positive sequence
+// oscillator state: X_alpha = Y_beta, X_beta = -Y_alpha) for bumpless transfer
+#define PR_PRELOAD_AB(a,b)    \
+    prF[0].Y = (a); prF[0].X = (b);  \
+    prF[1].Y = (b); prF[1].X = -(a)
+#define PR_PRELOAD()    PR_PRELOAD_AB(Cur_Alpha, Cur_Beta)
 
-volatile N16 counterValueR = 0;
-volatile N16 counterValueY = 0;
-volatile N16 counterValueB = 0;
-float volatile prev_valueR = 0;
-float volatile prev_valueY = 0;
+const float32_t prOrder[PR_NHARM] = {5.0, 7.0, 11.0, 13.0};
+Uint16 prActive = 0;        // controller in use last sample, for bumpless PI <-> PR switching
+Uint16 olActive = 0;        // open-loop test (VoltCtrlMode = 2) in use last sample
+float32_t olMod = 0.0;      // open-loop modulation index, ramped to OL_MOD_MAX
+float32_t fbTrimY = 1.0;    // VinvYSF / VinvRSF, updated every 1 ms
+float32_t fbTrimB = 1.0;    // VinvBSF / VinvRSF, updated every 1 ms
+float32_t fbTrimYinv = 1.0, fbTrimBinv = 1.0;                // 1/fbTrimY, 1/fbTrimB
+float32_t sfOutInvR = 1.0, sfOutInvY = 1.0, sfOutInvB = 1.0; // 1/VoutxSF
 
-volatile N16 simBalance = 0;        // 1 = use simulated Idc1/Idc2 counts
-volatile N16 simIdc1Count = 1200;   // raw ADC counts (0..4095)
-volatile N16 simIdc2Count = 1300;
+inline void SendCANPackets(void);
+inline void CurrentModeSelection(void);
+inline void pll_and_sincos(void);
 
-
-#pragma CODE_SECTION(AdcISR, ".TI.ramfunc");
-
-#define FLOAT_CONVERTER_DC    0.000244140625
-#define FLOAT_CONVERTER_AC    0.00048828125
-
-#define DC_AVG_MAX      150     // size of vdc_buf/idc1_buf/idc2_buf/ibat_buf (ccVariables.h)
-#define FAST_OC_MS      10      // DC overload above IdcHL this long (ms) -> trip
-
-N16 fastOCTimer = 0;
-
-float prevSin = 0;
-float prevSin1 = 0;
-N16 npoints = 0;
-N16 qrtrCycle = 0;
-uint32_t cap_now = 0;
-uint32_t cap_now_n = 0;
-volatile uint32_t cap_prev = 0;
-volatile uint32_t dt_ticks = 0;
-volatile uint32_t sum_dt_ticks = 0;
-
-int tmp_zcdCountN = 0;
-
-void inline piCon(PI_CONTROLLER *v)
+interrupt void AdcISR(void)
 {
-    v->err = v->Ref - v->Fbk;
-    v->up = v->Kp * v->err;
-    v->ui += v->Ki * v->err;
-    if (v->ui > v->Umax) v->ui = v->Umax;
-    if (v->ui < v->Umin) v->ui = v->Umin;
-    v->v1 = v->up + v->ui;
-    if (v->v1 > v->Umax) v->Out = v->Umax;
-    else if (v->v1 < v->Umin) v->Out = v->Umin;
-    else v->Out = v->v1;
-
-}
-
-
-/*--------------------------------------------------------------------------
- Function Name: AdcISR
- Description:   This interrupt captures the AD count values as well as acts
- as a ZC detector. The two half cycles are captured in two
- separate arrays. The very first half cycles is not captured
- Capture starts from second half cycle.
-
- Takes          :   None
- Returns        :   None
- Funcs Called   :   None
- Author         :   Vijayan C A
-
- History Log:
- ---------------------------------------------------------------------------
-  Date      | Modified By |         Comments
- ---------------------------------------------------------------------------
- 10/02/2012   VCA               Created
- ---------------------------------------------------------------------------*/
-volatile int sptr = 0;
-interrupt void AdcISR(void) {
-
+    adcStart_Timer = CpuTimer0Regs.TIM.all;
     AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1;
+   // GPIO_WritePin(24, 1);
+
     if(AdcaRegs.ADCINTOVF.bit.ADCINT1)
     {
         AdcaRegs.ADCINTOVFCLR.bit.ADCINT1 = 1; //clear INT1 overflow flag
         AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1; //clear INT1 flag
     }
 
-    // (ISR timing marker on GPIO60 removed: GPIO60 is RLY1 on the Common Controller v2)
     temp_AdcIsrCount++;
-    if(piCounter<PI_Interval) piCounter++;
-    else {piCounter = 0; doPID = TRUE; }
 
-    // Common Controller v2, SOC map in BoardInit.c setupADC(); AnalogInputN
-    // follow the labels in RectParams.h (ADC / SOC / channel)
-    AnalogInput1  = AdcdResultRegs.ADCRESULT0; // D 0  D14  Vinp_R
-    AnalogInput2  = AdceResultRegs.ADCRESULT1; // E 1  E12  Vinp_Y
-    AnalogInput3  = AdcbResultRegs.ADCRESULT0; // B 0  B3   Vinp_B
+    // Common Controller v2 SOC map (BoardInit.c setupADC(), board_pin_map.h):
+    //        SOC0        SOC1        SOC2        SOC3          SOC4
+    //  A   Ir_ind A0   Ir_out A5   Ib_out A8   Vb_byp A14    Temp1 A9
+    //  B   Vb_inv B3   Iy_out B8   Vy_byp B9   Vref1.5 B0    Temp3 B1
+    //  C   Iy_ind C5   VdcLink C0  Vr_byp C9   Vbat C2       Temp2 C8
+    //  D   Vr_inv D14  Vb_out D15  Vy_out D12  Ibat D11      -
+    //  E   Ib_ind E11  Vy_inv E12  Vr_out E16  -             -
+    // A14 reads Vb_byp (bypass jumper on the board, not Vload).
+    AnalogInput1 = AdcdResultRegs.ADCRESULT0;   // VinvR   D14
+    AnalogInput2 = AdceResultRegs.ADCRESULT1;   // VinvY   E12
+    AnalogInput3 = AdcbResultRegs.ADCRESULT0;   // VinvB   B3
+    AnalogInput4 = AdcaResultRegs.ADCRESULT1;   // IoutR   A5
+    AnalogInput5 = AdcbResultRegs.ADCRESULT1;   // IoutY   B8
+    AnalogInput6 = AdcaResultRegs.ADCRESULT2;   // IoutB   A8
+    AnalogInput7 = AdcaResultRegs.ADCRESULT4;   // Temp1   A9
 
-    AnalogInput4  = AdcaResultRegs.ADCRESULT1; // A 1  A5   Iinp_R
-    AnalogInput5  = AdcbResultRegs.ADCRESULT1; // B 1  B8   Iinp_Y
-    AnalogInput6  = AdcaResultRegs.ADCRESULT2; // A 2  A8   Iinp_B
+    AnalogInput8 = AdcbResultRegs.ADCRESULT3;   // Vref1.5 B0
+    AnalogInput9 = AdccResultRegs.ADCRESULT2;   // Vr Bypass C9
+    AnalogInput10 = AdcbResultRegs.ADCRESULT2;  // Vy Bypass B9
+    AnalogInput11 = AdcaResultRegs.ADCRESULT3;  // Vb Bypass A14
+    AnalogInput12 = AdcaResultRegs.ADCRESULT0;  // Ir Ind  A0
+    AnalogInput13 = AdccResultRegs.ADCRESULT0;  // Iy Ind  C5
+    AnalogInput14 = AdceResultRegs.ADCRESULT0;  // Ib Ind  E11
 
-    AnalogInput7  = AdccResultRegs.ADCRESULT1; // C 1  C0   Vdc
-    AnalogInput8  = AdcaResultRegs.ADCRESULT0; // A 0  A0   Idc1 (bridge 1)
-    AnalogInput9  = AdccResultRegs.ADCRESULT0; // C 0  C5   Idc2 (bridge 2)
-    AnalogInput10 = AdccResultRegs.ADCRESULT3; // C 3  C2   Vbat
-    AnalogInput11 = AdcdResultRegs.ADCRESULT3; // D 3  D11  Ibat
-    AnalogInput12 = AdcaResultRegs.ADCRESULT3; // A 3  A14  Vload
-    AnalogInput13 = 0;                         //           Vref (external) - not on this board
-    AnalogInput14 = 0;                         //           Iref (external) - not on this board
-    AnalogInput15 = AdcbResultRegs.ADCRESULT3; // B 3  B0   Vref1.5
-    AnalogInput16 = AdcaResultRegs.ADCRESULT4; // A 4  A9   Temp1
-    AnalogInput17 = AdccResultRegs.ADCRESULT4; // C 4  C8   Temp2
-    AnalogInput18 = AdcbResultRegs.ADCRESULT4; // B 4  B1   Temp3 (display only)
-    adcSamples++;
+    AnalogInput15 = AdccResultRegs.ADCRESULT1;  // DC Link C0
+    AnalogInput16 = AdccResultRegs.ADCRESULT4;  // Temp2   C8
+    AnalogInput17 = AdceResultRegs.ADCRESULT2;  // Vout R  E16
+    AnalogInput18 = AdcdResultRegs.ADCRESULT2;  // Vout Y  D12
+    AnalogInput19 = AdcdResultRegs.ADCRESULT1;  // Vout B  D15
+    AnalogInput20 = AdccResultRegs.ADCRESULT3;  // Vbat    C2
+    AnalogInput21 = AdcdResultRegs.ADCRESULT3;  // Ibat    D11
 
-    lpf_bias.u = (float) (AnalogInput15) * FLOAT_CONVERTER_AC;
-     LOWPASSFILTER(lpf_bias);
+    lpf_bias.u = (float) (AnalogInput8)  * FLOAT_CONVERTER_AC;
+    LOWPASSFILTER(lpf_bias);
 
-     // Balancing test: set simBalance = 1 from the debugger to replace the
-     // Idc1/Idc2 ADC counts with simIdc1Count/simIdc2Count. Leave 0 in service.
-     if(simBalance)
-     {
-         AnalogInput8 = simIdc1Count;
-         AnalogInput9 = simIdc2Count;
-     }
+    lpf_vInvR.u = (float) (AnalogInput1 - an1Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_vInvY.u = (float) (AnalogInput2 - an2Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_vInvB.u = (float) (AnalogInput3 - an3Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    LOWPASSFILTER(lpf_vInvR);
+    LOWPASSFILTER(lpf_vInvY);
+    LOWPASSFILTER(lpf_vInvB);
 
-     lpf_vInpR.u = (float) (AnalogInput1 - vrOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
-     lpf_vInpY.u = (float) (AnalogInput2 - vyOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
-     lpf_vInpB.u = (float) (AnalogInput3 - vbOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
-     LOWPASSFILTER(lpf_vInpR);
-     LOWPASSFILTER(lpf_vInpY);
-     LOWPASSFILTER(lpf_vInpB);
+if(Master==0)
+{
+    if(lpf_vInvR.u >vacPeakLimit) { if(vachighTripCount<20) vachighTripCount++;}
+    else {if(vachighTripCount) vachighTripCount--; }
+    if(vachighTripCount==20) vacHighFault = TRUE;
+    else if(vachighTripCount==0) vacHighFault = FALSE;
 
-     pllGrid.va =  lpf_vInpR.y;   //Vab
-     pllGrid.vb =  lpf_vInpY.y;   //Vbc;
-     pllGrid.vc =  lpf_vInpB.y;   //Vca;
-     pll_omega = phaseLockedLoopB(&pllGrid);
+ }
+else {vachighTripCount = 0; vacHighFault = FALSE;}
 
-//--------------------------------------------------------------------------
-          //if( (lpf_vInpR.y>= 0.0) && (prev_valueR< 0.0) )
-          if( (pllGrid.theta.sin_val>= 0.0) && (prev_valueR< 0.0) )
-                 {
-                    STOP_TIMER0;
-                    LOAD_TIMER0(AlphaCount);
-                    START_TIMER0;
-                    alpha_R_start = ECap1Regs.TSCTR;
-                    zcdCount = 0;
-                    rp_count = 0;
-                    rsync = TRUE;
+    lpf_iInvR.u = (float) (AnalogInput12 - an12Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_iInvY.u = (float) (AnalogInput13 - an13Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_iInvB.u = (float) (AnalogInput14 - an14Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    LOWPASSFILTER(lpf_iInvR);
+    LOWPASSFILTER(lpf_iInvY);
+    LOWPASSFILTER(lpf_iInvB);
 
-                    if (snap_end == 0) snap_start = 1;
+    lpf_voutR.u = (float) (AnalogInput17 - an17Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_voutY.u = (float) (AnalogInput18 - an18Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_voutB.u = (float) (AnalogInput19 - an19Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    LOWPASSFILTER(lpf_voutR);
+    LOWPASSFILTER(lpf_voutY);
+    LOWPASSFILTER(lpf_voutB);
 
-                    if((lpf_vInpY.y > 0) || (lpf_vInpB.y<0))
-                    {
-                        if (seqFailTimer<SEQFAILDELAY) seqFailTimer++;
-                    }
-                    else if(seqFailTimer) seqFailTimer--;
+    lpf_ioutR.u = (float) (AnalogInput4 - an4Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_ioutY.u = (float) (AnalogInput5 - an5Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_ioutB.u = (float) (AnalogInput6 - an6Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    LOWPASSFILTER(lpf_ioutR);
+    LOWPASSFILTER(lpf_ioutY);
+    LOWPASSFILTER(lpf_ioutB);
+//
+//    lpf_ioutR.y = theta_fb.sin_val * 0.2;
+//    lpf_ioutY.y = theta_fb_120.sin_val * 0.1;
+//    lpf_ioutB.y = theta_fb_240.sin_val * 0.15;
 
-                    cap_now = ECap1Regs.TSCTR;
-                    dt_ticks = (uint32_t)(cap_now - cap_prev);   // unsigned handles wrap safely
-                    cap_prev = cap_now;
-                    tmp_zcdCount++;
-
-                    sum_dt_ticks += dt_ticks;
-                    sptr++;
-                    if(sptr>=32) {sptr = 0; periodCount = (sum_dt_ticks >>5); sum_dt_ticks = 0; }
-
-                    if(pwmEnabled==1)
-                        {
-                            ncycle++;
-                            if(ncycle==3)
-                            {
-                               ENABLE_PWM();
-                               pwmEnabled = 2;
-                               ncycle = 0;
-                            }
-                        }
-                 }
-            prev_valueR = pllGrid.theta.sin_val;
-//            prev_valueR = lpf_vInpR.y;
-
-            if( (pllGrid.theta.sin_val<= 0.0) && (prev_valueY> 0.0) )
-                 {
-                    STOP_TIMER1;
-                    LOAD_TIMER1(AlphaCount);
-                    START_TIMER1;
-                    alpha_Y_start = ECap1Regs.TSCTR;
-                    bp_count = 0;
-                    tmp_zcdCountN++;
-
-                    if(adcSamples<MinPoints) adcSamples = FullCycle;
-                    SamplesPerCycle = adcSamples;
-                    adcSamples = 0;
-                    // DC feedback window = SamplesPerCycle / AverageCount
-                    // (3 -> 1/3 cycle: 2 x 300 Hz and 4 x 600 Hz ripple periods)
-                    if(AverageCount > 0) cycle3count = SamplesPerCycle/AverageCount;
-                    if(cycle3count > DC_AVG_MAX) cycle3count = DC_AVG_MAX;
-
-                 }
-            prev_valueY = pllGrid.theta.sin_val;
-//----------------------------------------------------------------------------------------
+    lpf_vbypR.u = (float) (AnalogInput9 - an9Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_vbypY.u = (float) (AnalogInput10 - an10Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    lpf_vbypB.u = (float) (AnalogInput11 - an11Offset) * FLOAT_CONVERTER_AC - lpf_bias.u;
+    LOWPASSFILTER(lpf_vbypR);
+    LOWPASSFILTER(lpf_vbypY);
+    LOWPASSFILTER(lpf_vbypB);
 
 
-     lpf_iInpR.y = (float) (AnalogInput4 - irOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
-     lpf_iInpY.y = (float) (AnalogInput5 - iyOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
-     lpf_iInpB.y = (float) (AnalogInput6 - ibOffset) * FLOAT_CONVERTER_AC - lpf_bias.y;
+    lpf_vbat.u = (float)AnalogInput20 * FLOAT_CONVERTER_DC;
+    LOWPASSFILTER(lpf_vbat);
+    lpf_ibat.u = (float)(AnalogInput21 - IbatOffset) * FLOAT_CONVERTER_DC;
+    LOWPASSFILTER(lpf_ibat);
 
-     lpf_vdc.u = (float)AnalogInput7 * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_vdc);
-     lpf_idc1.u = (float)(AnalogInput8 - Idc1Offset) * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_idc1);
-     lpf_idc2.u = (float)(AnalogInput9 - Idc2Offset) * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_idc2);
-     lpf_ibat.u = (float)(AnalogInput11 - IbatOffset) * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_ibat);
+    lpf_dclink.u = (float)(AnalogInput15) * FLOAT_CONVERTER_DC;
+    LOWPASSFILTER(lpf_dclink);
 
-     vdc_buf[vptr] = lpf_vdc.u;
-     idc1_buf[vptr] = lpf_idc1.u;
-     idc2_buf[vptr] = lpf_idc2.u;
-     ibat_buf[vptr] = lpf_ibat.u;
-     vptr++;
-     if(vptr>=cycle3count) vptr = 0;
-     if(vptr>=DC_AVG_MAX) vptr = 0;
+     checkLimitHN(lpf_dclink.u, dcOV_Inst_Level, DCOV_Inst_Delay,DCOVTimer);
+
+    if(DCOV_Inst_Delay == DCOVTimer) dcOV = TRUE;
+    else if(DCOVTimer == 0) dcOV = FALSE;
+
+    lpf_temp1.u = (float)AnalogInput7 * FLOAT_CONVERTER_DC;
+    lpf_temp2.u = (float)AnalogInput16 * FLOAT_CONVERTER_DC;
+    LOWPASSFILTER(lpf_temp1);
+    LOWPASSFILTER(lpf_temp2);
 
 
-     samplingCount_tmp++;
-     vdcCycleSum += lpf_vdc.u;
+//#define DUMMYSIG
+#ifdef DUMMYSIG
+#ifndef SHIFTED_FBACK
+    #define th120   theta_inv_120
+    #define th240   theta_inv_240
+    #else
+    #define th120   theta_fb_120
+    #define th240   theta_fb_240
+#endif
 
-     lpf_vbat.u = (float)AnalogInput10 * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_vbat);
+if(pwmEnabled)    {
+    lpf_vInvR.y = theta_inv.sin_val*.271;
+    lpf_vInvY.y = th120.sin_val*.271;
+    lpf_vInvB.y = th240.sin_val*.271;
+}
+else
+{
+    lpf_vInvR.y = 0;
+    lpf_vInvY.y = 0;
+    lpf_vInvB.y = 0;
+}
 
-     lpf_vload.u = (float)AnalogInput12 * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_vload);
+    lpf_vbypR.y = theta_inv.sin_val*.261;
+    lpf_vbypY.y = th120.sin_val*.261;
+    lpf_vbypB.y = th240.sin_val*.261;
 
-     lpf_temp1.u = (float)AnalogInput16 * FLOAT_CONVERTER_DC;
-     lpf_temp2.u = (float)AnalogInput17 * FLOAT_CONVERTER_DC;
-     lpf_temp3.u = (float)AnalogInput18 * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_temp1);
-     LOWPASSFILTER(lpf_temp2);
-     LOWPASSFILTER(lpf_temp3);
-//---------------------------------------------------------------------------
+    if(SystemFlag.bit.LOADONINV)
+    {
+        lpf_voutR.y = lpf_vInvR.y;
+        lpf_voutY.y = lpf_vInvY.y;
+        lpf_voutB.y = lpf_vInvB.y;
+    }
 
-     // External V/I reference inputs are not on the Common Controller v2
-     // (AnalogInput13/14 = 0): use ExtRefEnable = 0.
-     lpf_vref.u = (float)AnalogInput13 * FLOAT_CONVERTER_DC;
-     lpf_iref.u = (float)AnalogInput14 * FLOAT_CONVERTER_DC;
-     LOWPASSFILTER(lpf_vref);
-     LOWPASSFILTER(lpf_iref);
+    if(SystemFlag.bit.LOADONBYP)
+    {
+        lpf_voutR.y = lpf_vbypR.y;
+        lpf_voutY.y = lpf_vbypY.y;
+        lpf_voutB.y = lpf_vbypB.y;
+    }
 
-     if(lpf_vref.y<(0.66)) extVref = lpf_vref.y;
-     else extVref = (0.66);
-     if(lpf_iref.y<(0.66)) extIbatref = lpf_iref.y;
-     else extIbatref = (0.66);
+    lpf_iInvR.y = theta_inv.sin_val* 0.20;
+    lpf_iInvY.y = th120.sin_val*.20;
+    lpf_iInvB.y = th240.sin_val*.20;
 
-     vol_Rph = (lpf_vInpR.y - lpf_vInpB.y) * 0.33333333333f;
-     vol_Yph = (lpf_vInpY.y - lpf_vInpR.y) * 0.33333333333f;
-     vol_Bph = (lpf_vInpB.y - lpf_vInpY.y) * 0.33333333333f;
-     rmsCal();
+    lpf_ioutR.y = theta_inv.sin_val* 0.20;
+    lpf_ioutY.y = th120.sin_val*.20;
+    lpf_ioutB.y = th240.sin_val*.20;
+    lpf_dclink.y = 0.4;
 
-     //-----------------------------------------------------------------------------
-          saveCounter++;
-          saveCounter &= 1023;
+#endif
 
-          if (snap_start == 1) {
-              if ((saveCounter % nCycles) == 0)
-              {
-                  waveBuffer[snap_ptr] = (*waveptr);
-                  snap_ptr++;
-                  if (snap_ptr >= SNAP_SIZE)
-                  {
-                      snap_start = 0;
-                      snap_end = 1;
-                      snap_ptr = 0;   //count starts from 0 to SnapSize
-                  }
-              }
-          }
-     //-----------------------------------------------------------------------------
 
-     PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;// Acknowledge interrupt to PIE
+   /*** Reference current calculation ***/
+        // Per-phase sensor calibration applied to the feedback, relative to R
+        // (the voltage reference is already scaled by VinvRSF). Without it a
+        // sensor gain mismatch looks like an imbalance -> 100 Hz ripple in d-q.
+        vcontrol.vol.a = lpf_vInvR.y;
+        vcontrol.vol.b = lpf_vInvY.y * fbTrimY;
+        vcontrol.vol.c = lpf_vInvB.y * fbTrimB;
+
+        // Output voltages for measurement and plots with the SVPWM common-mode
+        // (zero-sequence) part removed: the sensors are not referenced to the load
+        // neutral. Weighted by each channel's scale factor so a gain mismatch does
+        // not leak into the common-mode estimate. lpf_vout*.y (filter state) is untouched.
+        {
+            float32_t zo = (lpf_voutR.y*VoutRSF + lpf_voutY.y*VoutYSF + lpf_voutB.y*VoutBSF) * (1.0/3.0);
+            vOutR = lpf_voutR.y - zo*sfOutInvR;
+            vOutY = lpf_voutY.y - zo*sfOutInvY;
+            vOutB = lpf_voutB.y - zo*sfOutInvB;
+        }
+       vcontrol.theta_o = theta_inv;
+
+
+   #ifdef SHIFTED_FBACK
+       vcontrol.theta = theta_fb;
+   #else
+       vcontrol.theta = theta_inv;
+   #endif
+
+       getReferenceVoltage();
+       getReferenceCurrent();
+
+//***********************************************************************************
+
+       if(Master==0)
+           {
+               CurrentModeSelection();
+               if(MasterPresentTimer>5) CommStatus.bit.CAN_MASTER =  TRUE;
+               else  CommStatus.bit.CAN_MASTER =  FALSE;
+           }
+
+//-------------------------------------------------------------------------------------
+       SendCANPackets();
+       pll_and_sincos();
+//-----------------------------------------------------------------------------------------------------------------
+
+#ifndef SHIFTED_FBACK
+            theta_inv_120.sin_val = sinf(angleActive + ANGLE120);
+            theta_inv_240.sin_val = sinf(angleActive + ANGLE240);
+#else
+             theta_fb.sin_val = sinf(angleActive + Angle30);
+             theta_fb.cos_val = cosf(angleActive + Angle30);
+             theta_fb_120.sin_val = sinf(angleActive + ANGLE120 + Angle30);
+             theta_fb_240.sin_val = sinf(angleActive + ANGLE240 + Angle30);
+#endif
+
+//---------------------------------------------------------------------------------------
+
+//--------------------------------------------------------------------------------------------------
+             if(Synced && (syncTimer==0) && (bypassFailed==0) && (Master || !CommStatus.bit.CAN_MASTER))
+             {
+                 bypSin = pllBypass.theta.sin_val;
+                 bypCos = pllBypass.theta.cos_val;
+                 omegaActive = 2;
+             }
+             else
+             {
+                 bypSin = theta_inv.sin_val;
+                 bypCos = theta_inv.cos_val;
+                 omegaActive = 1;
+                // omegaShift = 0.00001;
+             }
+                  if((bypSin >= 0.0) && (prevSin < 0.0) && (bypCos > 0.8))
+                      {
+                          Angle = 0;
+
+                          if(LimitFlag.bit.BYPASSOK && (frequencyMatch))
+                          {
+                              if( (pllBypass.theta.cos_val > 0.8) && (fabsf(pllBypass.theta.sin_val) < LockingLevel) && (Synced==FALSE))
+                                  {
+                                         Synced = TRUE;
+                                         SystemFlag.bit.NOTSYNCED = FALSE;
+                                         syncTimer = 1000;
+                                  }
+                          }
+                          rsync = 1;
+
+                          samplesPerCycle = zcdptr;
+                          if(samplesPerCycle < MINPOINTS) samplesPerCycle = FULLCYCLE;
+                          nPoints = samplesPerCycle >> 2;
+
+                          zcdptr = 0;
+                          if (snap_end == 0) snap_start = 1;
+
+                          if(pwmEnabled && (pulseON==0))
+                          {
+                              ENABLE_PWM();
+
+                          }
+
+                      } //rsync condition
+
+                  prevSin = bypSin;
+                  zcdptr++;
+//--------------------------------------------------------------------------------------------------
+        // (debug DAC output of bypSin removed: no free DAC pin on the Common Controller v2)
+
+        rmsCal();
+
+        adcStart_Timer -= (long) CpuTimer0Regs.TIM.all;      // timer counts down, 1 count = 1 SYSCLK
+        if(adcStart_Timer < 0) adcStart_Timer += (long) CpuTimer0Regs.PRD.all + 1;
+        adcIsrTime = (int) adcStart_Timer;
+        if(adrIsrDuration < adcIsrTime) adrIsrDuration = adcIsrTime;
+
+//-------------------------------------------------------------------------------------------------------
+     //   GPIO_WritePin(24, 0);
+       PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;// Acknowledge interrupt to PIE
  }
 
-//---------------------------------------------------------------------------
-//  rmsCal:
-//---------------------------------------------------------------------------
-//  This function calculates the RMS values of the voltages and currents
-//  required for display through HMI
 
-inline void rmsCal() {
+inline void getReferenceCurrent(void)
+{
+float   tmpAlpha = 0;
+float   tmpBeta = 0;
+float   tmpZero = 0;
 
-    UPDATE_RMS(vll_meter_R, lpf_vInpR.y);
-    UPDATE_RMS(vll_meter_Y, lpf_vInpY.y);
-    UPDATE_RMS(vll_meter_B, lpf_vInpB.y);
+    RYB2AB_F(tmpAlpha, tmpBeta, tmpZero, lpf_ioutR.y, lpf_ioutY.y, lpf_ioutB.y);
+    AB2DQ_F(cur.lpf_de.u,cur.lpf_qe.u,tmpAlpha,tmpBeta,vcontrol.theta);
 
-    UPDATE_RMS(volt_meter_R, vol_Rph);
-    UPDATE_RMS(volt_meter_Y, vol_Yph);
-    UPDATE_RMS(volt_meter_B, vol_Bph);
+    LOWPASSFILTER(cur.lpf_de);
+    LOWPASSFILTER(cur.lpf_qe);
 
-    UPDATE_RMS(vdcRipple_meter, (lpf_vdc.u - vdcAvg));
+    cur.pi_qe.Ref = 0;
+    cur.pi_qe.Fbk = cur.lpf_qe.y;
+    PIREGULATOR(cur.pi_qe);
 
-    UPDATE_RMS(cur_meter_R, lpf_iInpR.y);
-    UPDATE_RMS(cur_meter_Y, lpf_iInpY.y);
-    UPDATE_RMS(cur_meter_B, lpf_iInpB.y);
+    cur.pi_de.Ref = newCurReference;
+    cur.pi_de.Fbk = cur.lpf_de.y;
+    PIREGULATOR(cur.pi_de);
+//--------------------------------------------------------------------------------
+    AB2DQN_F(cur_neg.lpf_de.u,cur_neg.lpf_qe.u,tmpAlpha,tmpBeta,vcontrol.theta);
+    LOWPASSFILTER(cur_neg.lpf_de);
+    LOWPASSFILTER(cur_neg.lpf_qe);
 
-    UPDATE_KW(kw_meter_R, vol_Rph, lpf_iInpR.y, VinpRSF, IinpRSF);
-    UPDATE_KW(kw_meter_Y, vol_Yph, lpf_iInpY.y, VinpYSF, IinpYSF);
-    UPDATE_KW(kw_meter_B, vol_Bph, lpf_iInpB.y, VinpBSF, IinpBSF);
+    cur_neg.pi_qe.Ref = 0;
+    cur_neg.pi_qe.Fbk = cur_neg.lpf_qe.y;
+    PIREGULATOR(cur_neg.pi_qe);
 
-    if (rsync) {
-        //  Nop();
-        rms_samplecount = volt_meter_R.sample_count;
+    cur_neg.pi_de.Ref = 0;
+    cur_neg.pi_de.Fbk = cur_neg.lpf_de.y;
+    PIREGULATOR(cur_neg.pi_de);
 
-        SAVE_METER(vll_meter_R);
-        SAVE_METER(vll_meter_Y);
-        SAVE_METER(vll_meter_B);
+    DQ2AB_F(Cur_neg_Alpha, Cur_neg_Beta, cur_neg.pi_de.Out, cur_neg.pi_qe.Out, vcontrol.theta_o);
 
-        SAVE_METER(volt_meter_R);
-        SAVE_METER(volt_meter_Y);
-        SAVE_METER(volt_meter_B);
+       ffvd = (0.98) - cur.pi_de.Umax;
+       cross = (0.05);
+       ccvd = cur.lpf_qe.y*cross;
+       ccvq = cur.lpf_de.y*cross;
 
-        SAVE_METER(cur_meter_R);
-        SAVE_METER(cur_meter_Y);
-        SAVE_METER(cur_meter_B);
+       Cur_De = cur.pi_de.Out + ffvd + ccvd;
+       Cur_Qe = cur.pi_qe.Out  - ccvq + pllBypass.lpf1.y;
+       DQ2AB_F(Cur_Alpha, Cur_Beta, Cur_De, Cur_Qe, vcontrol.theta_o);
+       if(UnbalanceCorrection)
+       {
+           Cur_Alpha += Cur_neg_Alpha;
+           Cur_Beta += Cur_neg_Beta;
+       }
 
-        SAVE_METER(kw_meter_R);
-        SAVE_METER(kw_meter_Y);
-        SAVE_METER(kw_meter_B);
-        SAVE_METER(vdcRipple_meter);
+}
 
-        rms_update_flag = 1;
-        rsync = 0;
+inline void getReferenceVoltage(void)
+{
+        RYB2AB_F(vcontrol.vol.d,vcontrol.vol.q,vcontrol.vol.z,vcontrol.vol.a,vcontrol.vol.b,vcontrol.vol.c);
+    //ALPHA_BETA to DQ
+        AB2DQ_F(vcontrol.vol.lpf_de.u,vcontrol.vol.lpf_qe.u,vcontrol.vol.d,vcontrol.vol.q,vcontrol.theta);
+
+//ALPHA_BETA to DQ
+    AB2DQ_F(vcontrol.vol.lpf_de.u,vcontrol.vol.lpf_qe.u,vcontrol.vol.d,vcontrol.vol.q,vcontrol.theta);
+
+    LOWPASSFILTER(vcontrol.vol.lpf_de);
+    vcontrol.vol.de = vcontrol.vol.lpf_de.y;
+
+    if(vcontrol.vol.lpf_de.y < inverterFailLevel)
+    {
+            if(invfCount<10) invfCount++;
+            if(invfCount==10)
+                {
+                    inverterFailed = TRUE;
+                    SystemFlag.bit.INVFAILURE = TRUE;
+                    invokcounter = 0;
+                }
     }
+
+    else {
+            if(invfCount) invfCount--;
+            if(invokcounter<50) invokcounter++;
+            if(invokcounter>=50) { inverterFailed = FALSE; invfCount = 0; SystemFlag.bit.INVFAILURE = FALSE;}
+        }
+
+    LOWPASSFILTER(vcontrol.vol.lpf_qe);
+    vcontrol.vol.qe = vcontrol.vol.lpf_qe.y;
+
+if(VoltCtrlMode > 1.5)
+{
+    //------------------- open-loop test: fixed balanced modulation -------------------
+    // No voltage feedback, no Y/B factors: shows whether an imbalance comes from the
+    // power stage / transformer rather than from the controller.
+    if(!olActive)
+    {
+        // start from the present output level so entering the test is bumpless
+        olMod = sqrtf(vcontrol.alpha*vcontrol.alpha + vcontrol.beta*vcontrol.beta);
+        olActive = 1;
+    }
+    if(pwmEnabled)
+    {
+        olMod += OL_MOD_STEP;
+        if(olMod > OL_MOD_MAX) olMod = OL_MOD_MAX;
+    }
+    else olMod = 0.0;
+
+    vcontrol.alpha =  olMod*vcontrol.theta_o.sin_val;
+    vcontrol.beta  = -olMod*vcontrol.theta_o.cos_val;
+    AB2DQ_F(vcontrol.deo, vcontrol.qeo, vcontrol.alpha, vcontrol.beta, vcontrol.theta_o);
+    AB2RYB_F(vcontrol.refa, vcontrol.refb, vcontrol.refc, vcontrol.alpha, vcontrol.beta);
+
+    // keep PI preloaded for a bumpless return; PR is preloaded by the switch below
+    vcontrol.vol.pid_de.data.i1 = vcontrol.deo;
+    vcontrol.vol.pid_qe.data.i1 = vcontrol.qeo;
+    prActive = 0;
+}
+else
+{
+olActive = 0;
+
+if((VoltCtrlMode > 0.5) != prActive)
+{
+    // bumpless switch: preload the incoming controller with the present output
+    if(prActive == 0)
+    {
+        PR_PRELOAD_AB(vcontrol.alpha, vcontrol.beta);
+        for(prActive = 0; prActive < PR_NHARM; prActive++)
+        {
+            prH[prActive][0].Y = 0; prH[prActive][0].X = 0;
+            prH[prActive][1].Y = 0; prH[prActive][1].X = 0;
+        }
+        prActive = 1;
+    }
+    else
+    {
+        vcontrol.vol.pid_de.data.i1 = vcontrol.deo;
+        vcontrol.vol.pid_qe.data.i1 = vcontrol.qeo;
+        prActive = 0;
+    }
+}
+
+if(prActive)
+{
+    //------------------- PR control in alpha-beta ------------------------------------
+    // feedback rotated by -Angle30 (plane rotation: -30 for +ve seq, +30 for -ve seq)
+    float32_t fa, fb, ea, eb, ua, ub;
+    Uint16 h;
+
+    fa = vcontrol.vol.d*prRotC + vcontrol.vol.q*prRotS;
+    fb = vcontrol.vol.q*prRotC - vcontrol.vol.d*prRotS;
+
+    ea =  soft_VdRef*vcontrol.theta_o.sin_val - fa;
+    eb = -soft_VdRef*vcontrol.theta_o.cos_val - fb;
+
+    PR_RES_MACRO(prF[0], prKF, ea, prCoefF, prWd, PR_FUND_LIMIT);
+    PR_RES_MACRO(prF[1], prKF, eb, prCoefF, prWd, PR_FUND_LIMIT);
+
+    ua = inv_kp*ea + prF[0].out;
+    ub = inv_kp*eb + prF[1].out;
+
+    for(h = 0; h < PR_NHARM; h++)
+    {
+        if((prHMask & (1 << h)) && !SystemFlag.bit.SOFTSTART && !currentMode)
+        {
+            PR_RES_MACRO(prH[h][0], prKH, ea, prCoefH[h], prWd, pr_hLimit);
+            PR_RES_MACRO(prH[h][1], prKH, eb, prCoefH[h], prWd, pr_hLimit);
+            ua += prH[h][0].out;
+            ub += prH[h][1].out;
+        }
+        else
+        {
+            prH[h][0].Y = 0; prH[h][0].X = 0;
+            prH[h][1].Y = 0; prH[h][1].X = 0;
+        }
+    }
+
+   if( (xfr2InvTimer==0) && (addOn>0))
+        {
+           ua += addOn*vcontrol.theta_o.sin_val;
+           ub -= addOn*vcontrol.theta_o.cos_val;
+           addOn -= 0.00002;
+        }
+
+   vcontrol.alpha = ua;
+   vcontrol.beta = ub;
+   AB2DQ_F(vcontrol.deo, vcontrol.qeo, ua, ub, vcontrol.theta_o);
+   AB2RYB_F(vcontrol.refa, vcontrol.refb, vcontrol.refc, ua, ub);
+}
+else
+{
+    vcontrol.vol.pid_qe.term.Ref = (0.0);
+    vcontrol.vol.pid_qe.term.Fbk = vcontrol.vol.qe;
+    PID_GRANDO_F_MACRO(vcontrol.vol.pid_qe);
+
+    vcontrol.vol.pid_de.term.Ref = soft_VdRef;
+    vcontrol.vol.pid_de.term.Fbk = vcontrol.vol.de;
+    PID_GRANDO_F_MACRO(vcontrol.vol.pid_de);
+
+    vcontrol.deo = vcontrol.vol.pid_de.term.Out;
+    vcontrol.qeo = vcontrol.vol.pid_qe.term.Out;
+
+   if( (xfr2InvTimer==0) && (addOn>0))
+        {
+           vcontrol.deo += addOn;
+           addOn -= 0.00002;
+        }
+
+   DQ2AB_F(vcontrol.alpha, vcontrol.beta, vcontrol.deo, vcontrol.qeo, vcontrol.theta_o);
+   AB2RYB_F(vcontrol.refa, vcontrol.refb, vcontrol.refc, vcontrol.alpha, vcontrol.beta);
+
+   //------------------------------------------------------------------------------------------
+    vcontrol.refb = vcontrol.refb*Yfactor;
+    vcontrol.refc = vcontrol.refc*Bfactor;
+}
+}   // closed loop (PI / PR)
+
+    if(vcontrol.refa > SAT_LIMIT)  vcontrol.refa = SAT_LIMIT;
+    if(vcontrol.refb > SAT_LIMIT)  vcontrol.refb = SAT_LIMIT;
+    if(vcontrol.refc > SAT_LIMIT)  vcontrol.refc = SAT_LIMIT;
+    if(vcontrol.refa < SAT_LIMITN) vcontrol.refa = SAT_LIMITN;
+    if(vcontrol.refb < SAT_LIMITN) vcontrol.refb = SAT_LIMITN;
+    if(vcontrol.refc < SAT_LIMITN) vcontrol.refc = SAT_LIMITN;
+
 
 }
 
 
-interrupt void SCIARx_ISR(void)
+__interrupt void cpu_timer0_isr(void) {
+//	float32_t temp_omega = 0;
+ 	CpuTimer0.InterruptCount++;
+	mainLoopCount++;
+	temp_T0IsrCount++;
+
+    saveCounter++;
+    saveCounter &= 1023;
+
+        if (snap_start == 1) {
+            if ((saveCounter % nCycles) == 0)
+            {
+                waveBuffer[snap_ptr] = *waveptr;
+                snap_ptr++;
+
+                if (snap_ptr >= SNAP_SIZE) {
+                    snap_start = 0;
+                    snap_end = 1;
+                    snap_ptr = 0;   //count starts from 0 to SnapSize
+                }
+            }
+        }
+
+	PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+}
+
+
+N16 volatile LedShiftFlag = 0;
+
+/*
+ Routine tasks like IO control, delays etc runs at 1ms
+ */
+N16 volatile fTimesCount = 0;
+__interrupt void cpu_timer1_isr(void)
 {
+    N16 volatile iii = 0;
+
+	CpuTimer1.InterruptCount++;
+	mainLoopCount_prev = mainLoopCount;
+	mainLoopCount = 0;
+
+	if(syncTimer) syncTimer--;
+
+	PR_UpdateCoeffs();
+
+	fbTrimY = VinvYSF / VinvRSF;    // scale factors are range limited to 10..5000
+	fbTrimB = VinvBSF / VinvRSF;
+	fbTrimYinv = VinvRSF / VinvYSF;
+	fbTrimBinv = VinvRSF / VinvBSF;
+	sfOutInvR = 1.0 / VoutRSF;
+	sfOutInvY = 1.0 / VoutYSF;
+	sfOutInvB = 1.0 / VoutBSF;
+
+	// CANOKtimer: reloaded by each CAN-B paralleling frame (mcanInterface.c).
+	// No re-init on silence: a single unit has no CAN-B traffic; bus-off is
+	// handled in the main loop.
+	if(CANOKtimer) CANOKtimer--;
+
+	if(currentMode) LimitFlag.bit.CURMODE = TRUE;
+	else LimitFlag.bit.CURMODE = FALSE;
+
+	lpf_curRef.u = (remoteIref + cur.lpf_de.y) * 0.5;
+	LOWPASSFILTER(lpf_curRef);
+	if(lpf_curRef.y>0.0) newCurReference = lpf_curRef.y;
+	else newCurReference =0.0;
+
+    // (GPIO21 pulse-on flag removed: GPIO21 is DI_3 on the Common Controller v2)
+
+    if(waitTimer) waitTimer--;
+
+    #define OMEGA_INCDEC 0.00000015708
+    slaveOnInverter = PairStatusFlag.bit.LOADONINV;
+    slaveOnBypass =  PairStatusFlag.bit.LOADONBYP;
+    slaveDisabled = PairStatusFlag.bit.INVRTRDISABL;
+    slaveInvOK = PairStatusFlag.bit.INVOK;
+
+    if(Master==0) StaticSwitchControl_Slave ();
+        else
+            {
+                StaticSwitchControl_Master();
+                            //OMEGA TRACKING
+                            if(LimitFlag.bit.BYPASSOK && !bypassFailed)
+                             {
+                                 if((pll_omega > PLL_LOCK_MIN) && (pll_omega < PLL_LOCK_MAX))
+                                 {
+                                     if( (omega_inv - omegaShift) > pll_omega)
+                                     {
+                                         omega_inv -= 0.000001;
+                                     }
+                                     else if((omega_inv - omegaShift) < pll_omega)
+                                     {
+                                         omega_inv += 0.000001;
+                                     }
+
+                                     if(fabsf(omega_inv - pll_omega) < omegaShift)
+                                     {
+                                         if(fTimesCount<10) fTimesCount++;
+                                         if(fTimesCount==10) frequencyMatch = TRUE;
+                                     }
+                                     else if(fTimesCount) fTimesCount--;
+
+                                     if(Synced) omega_inv = pll_omega;
+
+                                 }
+                                 else    frequencyMatch = FALSE;
+                             } // Omega Within Range
+
+
+                             else
+                             {
+                                 frequencyMatch = FALSE;
+                                 if(omega_inv > defaultOmega) omega_inv -= OMEGA_INCDEC;
+                                 else if(omega_inv < defaultOmega) omega_inv += OMEGA_INCDEC;
+                                 SystemFlag.bit.NOTSYNCED = TRUE;
+                                 Synced = FALSE;
+                             }
+                        }//10ms once
+     //____________________________OMEGA TRACKING END__________________________
+
+	 if (interchar_silent_timer < INTERCHARDELAY)    interchar_silent_timer++;
+	 if (interchar_silent_timer1 < INTERCHARDELAY)   interchar_silent_timer1++;
+
+	    if (spi_timeout < SPI_TIME)
+	        spi_timeout++;
+
+	    if(msDelayCount)    msDelayCount--;
+
+if(Master == 0)
+{
+	    if(MasterPresentTimer )    MasterPresentTimer--;
+	    else
+	    {
+                PairStatusFlag.all  = 0;
+                CommStatus.bit.CAN_MASTER =  FALSE;
+	    }
+	    //else Master = 1;
+}
+
+        CheckHiLo(&chkVr);
+        CheckHiLo(&chkVy);
+        CheckHiLo(&chkVb);
+
+        CheckHiLo(&chkIr1);
+        CheckHiLo(&chkIy1);
+        CheckHiLo(&chkIb1);
+
+        CheckHiLo(&chkIr2);
+        CheckHiLo(&chkIy2);
+        CheckHiLo(&chkIb2);
+        CheckHiLo(&chkIr3);
+        CheckHiLo(&chkIy3);
+        CheckHiLo(&chkIb3);
+
+        CheckHiLo(&chkVbypr);
+        CheckHiLo(&chkVbypy);
+        CheckHiLo(&chkVbypb);
+
+        CheckHiLo(&chkVbat);
+        CheckHiLo(&chkVbatpre);
+        CheckHiLo(&chkIbat);
+        CheckHiLo(&chkdcLink);
+
+        if(IoutR < (InvCurHL_Lvl1a - 2.0))  chkIr1.maxTimer = 0;
+        if(IoutR < (InvCurHL_Lvl2a - 2.0))   chkIr2.maxTimer = 0;
+        if(IoutR < (InvCurHL_Lvl3a - 2.0))   chkIr3.maxTimer = 0;
+
+        IdRef = (cur.lpf_de.y + slave_Id)* 0.5;
+
+	    milliseconds++;
+
+	        if (milliseconds> 999)
+	        {
+	            milliseconds = 0;
+	            seconds++;
+	            txMsgCount = txMsgCount_tmp;
+	            txMsgCount_tmp = 0;
+
+	            canRxCounter = tmp_canRxCounter;
+	            tmp_canRxCounter = 0;
+
+	            FSW_Inv = temp_fsw1;
+	            temp_fsw1 = 0;
+	            AdcIsrCount = temp_AdcIsrCount;
+	            temp_AdcIsrCount = 0;
+	            T0IsrCount = temp_T0IsrCount;
+	            temp_T0IsrCount = 0;
+
+	            RTCSecond++;
+
+	            if(seconds > 59)
+	                {
+	                    seconds = 0;
+	                    minutes++;
+	                    if(minutes>59)
+	                         {
+	                            minutes = 0;
+//	                            hours++ ;
+//	                            if (hours>23) { hours = 0; days++; }
+	                         }
+	                    RTCSecond = 0;
+	                    RTCMinute++;
+	                    if(RTCMinute>59)
+	                        {
+	                        RTCMinute = 0;
+	                        RTCHour++;
+	                            if(RTCHour>23)
+	                            {
+	                                RTCDate++;
+	                            }
+	                        }
+	                }
+
+	            if(systemRunningTimer < FaultResetDelay) systemRunningTimer++;
+	            if((systemRunningTimer == FaultResetDelay) && (SystemFlag.bit.LATCHFAULT == FALSE) ) TripCount = 0;
+
+	                if(restartTimer)
+	                {
+	                    restartTimer--;
+
+	                    if( (TripCount < MaxRestartCount) && (restartTimer==0))
+	                    {
+	                        AUTO_RESET_FAULTS();
+
+	                    }
+	                }
+
+	                if(xfr2InvTimer>xfrToInverterDelay) xfr2InvTimer = xfrToInverterDelay;
+	                if(xfr2InvTimer) xfr2InvTimer--;
+	                if(xfr2BypTimer>xfrToBypassDelay) xfr2BypTimer = xfrToBypassDelay;
+	                if(xfr2BypTimer) xfr2BypTimer--;
+
+	                if(AutoSaveTimer) AutoSaveTimer--;
+	                if(AutoSaveTimer==1) autoSaveFlag = TRUE;
+
+	                if(mainsFailTimer) mainsFailTimer--;
+	        } //seconds condition
+
+	        if(SystemFlag.bit.POWERINGUP)
+	        {
+	            if (poweronTimer < PowerOnDelay) poweronTimer++;
+	        else    SystemFlag.bit.POWERINGUP = FALSE;
+
+	        }
+
+	            if (spi_timeout < SPI_TIME)
+	                spi_timeout++;
+
+	            if(msDelayCount)    msDelayCount--;
+
+	        // SYSLED (GPIO62, LED5): 5 Hz when running, 1 Hz when stopped
+	        if(pwmEnabled)
+	        {
+	            { if(milliseconds%100 == 0) GPIO_WritePin(62,2); }
+	        }
+
+	        else
+	            { if(milliseconds%500 == 0) GPIO_WritePin(62,2); }
+
+	        if (SystemFlag.bit.SOFTSTART || ReferenceChangedFlag )// && (startDelayTimer==0))
+	        {
+	                if (soft_VdRef < volRef_Id) soft_VdRef += ref_inc;
+
+	                else SystemFlag.bit.SOFTSTART = 0;
+	                if (soft_VqRef < volRef_Iq) soft_VqRef += ref_inc;
+
+
+	                if(soft_VdRef > volRef_Id) soft_VdRef = volRef_Id;
+	                if(soft_VqRef > volRef_Iq) soft_VqRef = volRef_Iq;
+
+	                if(soft_VdRef == volRef_Id) ReferenceChangedFlag = FALSE;
+
+	        }
+
+            if(DI_NO_Flag & 0x0001) { checkDI_NO(DINP1,DI1timer,DI_DELAY); }
+            else { checkDI_NC(DINP1,DI1timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0002) { checkDI_NO(DINP2,DI2timer,DI_DELAY); }
+            else { checkDI_NC(DINP2,DI2timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0004) { checkDI_NO(DINP3,DI3timer,DI_DELAY); }
+            else { checkDI_NC(DINP3,DI3timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0008) { checkDI_NO(DINP4,DI4timer,DI_DELAY); }
+            else { checkDI_NC(DINP4,DI4timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0010) { checkDI_NO(DINP5,DI5timer,DI_DELAY); }
+            else { checkDI_NC(DINP5,DI5timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0020) { checkDI_NO(DINP6,DI6timer,DI_DELAY); }
+            else { checkDI_NC(DINP6,DI6timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0040) { checkDI_NO(DINP7,DI7timer,DI_DELAY); }
+            else { checkDI_NC(DINP7,DI7timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0080) { checkDI_NO(DINP8,DI8timer,DI_DELAY); }
+            else { checkDI_NC(DINP8,DI8timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0100) { checkDI_NO(DINP9,DI9timer,DI_DELAY); }
+            else { checkDI_NC(DINP9,DI9timer,DI_DELAY); }
+            if(DI_NO_Flag & 0x0200) { checkDI_NO(DINP10,DI10timer,DI_DELAY); }
+            else { checkDI_NC(DINP10,DI10timer,DI_DELAY); }
+//-----------------------------------------------------------------------
+
+#define START_SAMPLE    1000
+#define BIAS_CHANNEL    AnalogInput8
+
+if(OffsetNotDone && (poweronTimer>=START_SAMPLE) && (poweronTimer<(1000+START_SAMPLE)))
+  {
+      offsets[1] += AnalogInput1 - BIAS_CHANNEL;
+      offsets[2] += AnalogInput2 - BIAS_CHANNEL;
+      offsets[3] += AnalogInput3 - BIAS_CHANNEL;
+
+      offsets[4] += AnalogInput4 - BIAS_CHANNEL;
+      offsets[5] += AnalogInput5 - BIAS_CHANNEL;
+      offsets[6] += AnalogInput6 - BIAS_CHANNEL;
+
+      offsets[9] += AnalogInput9 - BIAS_CHANNEL;
+      offsets[10] += AnalogInput10 - BIAS_CHANNEL;
+      offsets[11] += AnalogInput11 - BIAS_CHANNEL;
+      offsets[12] += AnalogInput12 - BIAS_CHANNEL;
+      offsets[13] += AnalogInput13 - BIAS_CHANNEL;
+      offsets[14] += AnalogInput14 - BIAS_CHANNEL;
+      offsets[15] += AnalogInput15 - BIAS_CHANNEL;
+
+      offsets[17] += AnalogInput17 - BIAS_CHANNEL;
+      offsets[18] += AnalogInput18 - BIAS_CHANNEL;
+      offsets[19] += AnalogInput19 - BIAS_CHANNEL;
+
+int g=0;
+      if(poweronTimer==(START_SAMPLE + 999))
+      {
+          for(g=1;g<20;g++)
+              ArrayParamsI[159+g] = offsets[g]/1000;
+          OffsetNotDone = FALSE;
+      }
+  }
+
+}
+
+__interrupt void cpu_timer2_isr(void) {
+
+	CpuTimer2.InterruptCount++;
+
+}
+
+interrupt void SCIRxISR(void) {
 
 	N16 temp_char = 0;
 
 	errorRx = SciaRegs.SCIRXST.bit.RXERROR;
-	if (1)//!errorRx)
+	if (!errorRx)
 	{
 
 	//temp_char = SCI_readCharNonBlocking(SCIA_BASE);//SciaRegs.SCIRXBUF.all;
 
 	temp_char = SciaRegs.SCIRXBUF.all;
 
+
+	interchar_silent_timer = 0;
 	rxbuffer = &rx_buffer[0];
 
-	if ((live_frame == FALSE) && (temp_char == address) && (interchar_silent_timer==INTERCHARDELAY) ) {
+	if ((live_frame == FALSE) && (temp_char == address)) {
 		char_waiting = 0;
 		live_frame = TRUE;
 		frame_complete = FALSE;
@@ -377,23 +941,19 @@ interrupt void SCIARx_ISR(void)
 	//rxata_block[char_waiting] = (char) temp_char;
 	*(rxbuffer + char_waiting) = temp_char;
 	++char_waiting;
-	char_waiting &= 0x3f; //to prevent over flow
+	char_waiting &= 0x1f; //to prevent over flow
 	}
-	else
-	{
-	    errorCount++;
-	}
-    interchar_silent_timer = 0;
+
 	PieCtrlRegs.PIEACK.all = PIEACK_GROUP9;
 }
 
-interrupt void SCIBRx_ISR(void) {
-
+// SCIB (RS485 #1, GUI port) receive. Framing / break errors on an idle or
+// unconnected RS485 line are counted and the receiver is software-reset here;
+// they must not touch errorRx, which makes main() re-initialise SCIA.
+interrupt void SCIBRx_ISR(void)
+{
     N16 temp_char1 = 0;
 
-    // SCIB errors (framing / break on an idle or unconnected RS485 #1) are handled
-    // here: count, flush and software-reset the receiver. They must not touch
-    // errorRx, which makes main() re-initialise SCIA.
     if (ScibRegs.SCIRXST.bit.RXERROR)
     {
         temp_char1 = ScibRegs.SCIRXBUF.all;     // discard
@@ -407,495 +967,294 @@ interrupt void SCIBRx_ISR(void) {
         temp_char1 = ScibRegs.SCIRXBUF.all;
         rxbuffer1 = &rx_buffer1[0];
 
-    if ((live_frame1 == FALSE) && (temp_char1 == address1) && (interchar_silent_timer1==INTERCHARDELAY))
-    {
-        char_waiting1 = 0;
-        live_frame1 = TRUE;
-        frame_complete1 = FALSE;
-    }
+        if ((live_frame1 == FALSE) && (temp_char1 == address1) && (interchar_silent_timer1 == INTERCHARDELAY))
+        {
+            char_waiting1 = 0;
+            live_frame1 = TRUE;
+            frame_complete1 = FALSE;
+        }
 
-    *(rxbuffer1 + char_waiting1) = temp_char1;
-    ++char_waiting1;
-    char_waiting1 &= 0x3f; //to prevent over flow
-    interchar_silent_timer1 = 0;
+        *(rxbuffer1 + char_waiting1) = temp_char1;
+        ++char_waiting1;
+        char_waiting1 &= 0x3f;      // to prevent overflow
+        interchar_silent_timer1 = 0;
     }
 
     PieCtrlRegs.PIEACK.all = PIEACK_GROUP9;
 }
 
-interrupt void ePWM1_ISR(void) {
-
-  //  EPwm1Regs.CMPA.bit.CMPA = INV_HALFPERIOD;
-//    EPwm2Regs.CMPA.bit.CMPA = INV_HALFPERIOD;
-    //EPwm3Regs.CMPA.bit.CMPA = INV_HALFPERIOD;;
-
-
-//---------------Reinitialize for next PWM sequence--------------
-    EPwm1Regs.ETCLR.bit.INT = 1;
-    PieCtrlRegs.PIEACK.all = PIEACK_GROUP3;
-
-}
-
-#define BIASCHANNEL AnalogInput15       // Vref1.5 (B0) on the Common Controller v2
-//volatile N16 zcdCount1 = 0;
-N16 ch = 0;
-
-void    ActiveBridgeBalancing(void)
-{
-        // Fast bridge currents (one-cycle moving average, idc1Fbk/idc2Fbk),
-        // not the 32-cycle averaged Idc1/Idc2 display values, so the loop
-        // can step every mains cycle (BalancingRate = 20 ms) without hunting
-        float i1 = idc1Fbk * Idc1SF;
-        float i2 = idc2Fbk * Idc2SF;
-
-        if((i1 + i2) > MinLoadCurrent)  //min 20A
-        {
-            if(i1 > (i2 + MinUnbalanceCurrent))
-                {
-                    if(Bridge2LagCount_1) Bridge2LagCount_1--;
-                    else if(Bridge2LeadCount_1 < MaxBalanceCount) Bridge2LeadCount_1++;
-                }
-            else if(i2 > (i1 + MinUnbalanceCurrent))
-                {
-                        if(Bridge2LeadCount_1) Bridge2LeadCount_1--;
-                        else if(Bridge2LagCount_1 < MaxBalanceCount) Bridge2LagCount_1++;
-                }
-        }
-        else {Bridge2LeadCount_1 = 0; Bridge2LagCount_1 = 0; }
-}
-int n = 0;
-N16 MasterRunning_old1 = 0;
-inline void ControlLoop(void)
-{
-    N16 tmpCount = 0;//, i = 0;
-    int i = 0;
- //   float _maxVref = 0;
-//------------------CLOSED LOOP CONTROL--------------------------
-
-    if(cycle3count<100)     // no valid cycle yet: 1/3 cycle at ~20 kHz sampling
-     {
-         cycle3count =  133;
-         if(GridFrequency==60) cycle3count = 111;
-     }
-
-    _vdcsum = 0; _idc1sum = 0;_ibatsum = 0;_idc2sum = 0;
-
-   for(i=0;i<cycle3count;i++)
-   {
-       _vdcsum += vdc_buf[i];
-       _idc1sum += idc1_buf[i];
-       _idc2sum += idc2_buf[i];
-       _ibatsum += ibat_buf[i];
-   }
-       vdcFbk  = _vdcsum/ cycle3count;
-       idc1Fbk = _idc1sum/ cycle3count;
-       idc2Fbk = _idc2sum/ cycle3count;
-       ibatFbk = _ibatsum/ cycle3count;
-
-    lpf_remVref.u = (vol_ref_remote + VrefAdjust);
-    LOWPASSFILTER(lpf_remVref);
-    if(lpf_ifback.y < (0.001)) lpf_ifback.y = (0.001);
-
-         if(CurrentSensingMode==0) idc2Fbk = 0;
-         IdcFback = idc1Fbk +  idc2Fbk * sfFactor;
-
-    // Fast DC overload trip. Total DC current from the 1/3-cycle average
-    // (not the 640 ms display value): above IdcHL for FAST_OC_MS -> pulses
-    // off at once (TZ one-shot); updateStatus() then raises TRIPFAULT and the
-    // normal TripCount / auto-restart handling applies. Trip time ~10-17 ms.
-         if(pwmEnabled && ((idc1Fbk * Idc1SF + idc2Fbk * Idc2SF) > IdcHL))
-         {
-             if(fastOCTimer < FAST_OC_MS) fastOCTimer++;
-         }
-         else fastOCTimer = 0;
-
-         if((fastOCTimer >= FAST_OC_MS) && !fastOCTrip)
-         {
-             DISABLE_PWM();
-             pwmEnabled = FALSE;
-             fastOCTrip = TRUE;
-             faultFlag |= BIT00;     // cause latched for the GUI/display until RESET
-         }
-//-----------------------------------
-         lpf_ifback.u = cur_fback_remote;
-         LOWPASSFILTER(lpf_ifback);
-         lpf_ibatfback.u = ibat_fback_remote;
-         LOWPASSFILTER(lpf_ibatfback);
-
-         lpf_pid.u = IdcFback;
-         LOWPASSFILTER(lpf_pid);
-
-         tmp_pidcount++;
-         SlaveIdcRef = (lpf_ifback.y + lpf_pid.y) * 0.5;// + VrefAdjust;
-         if(SlaveIdcRef< 0.001) SlaveIdcRef = (0.001) ;
-
-         SlaveIbatRef = (lpf_ifback.y + lpf_pid.y) * 0.5;// + VrefAdjust;
-         if(SlaveIdcRef< 0.001) SlaveIdcRef = (0.001) ;
-
-
-         SystemFlag_Remote = SystemFlag_Rem.all;
-         MasterRunning = SystemFlag_Rem.bit.UNITON;
-         if(address==1) MasterRunning = 0;
-
-         if((MasterRunning_old == 0) && MasterRunning)
-         {
-             SystemFlag.bit.SOFTSTART = TRUE;
-             Transition = TRUE;
-         }
-         MasterRunning_old = MasterRunning;
-#define INC 0.00005
-         if((address == 2) && SharingEnable && !LimitFlag.bit.CANFAIL && MasterRunning)
-             {
-                 if(Transition)
-                 {
-                     if(referenceI < SlaveIdcRef) referenceI += INC;
-                     else if(referenceI > SlaveIdcRef) referenceI -= INC;
-                     if(referenceV < (lpf_remVref.y + VrefAdjust)) referenceV += INC;
-                     else if(referenceV > (lpf_remVref.y + VrefAdjust)) referenceV -= INC;
-//                     soft_VdcRef = referenceV;
-//                     soft_IdcRef = referenceI;
-                 }
-                 else
-                 {
-                     if(SlaveIdcRef <= soft_IdcRef) referenceI = SlaveIdcRef;
-                     else referenceI = soft_IdcRef;
-                     if(SlaveIbatRef <= soft_IbatRef) SlaveIbatRef = SlaveIbatRef;
-                     else SlaveIbatRef = soft_IbatRef;
-
-                      if((lpf_remVref.y + VrefAdjust) <= soft_VdcRef) referenceV = (lpf_remVref.y + VrefAdjust);
-                     else referenceV = soft_VdcRef;
-
-                 }
-
-              }
-         else
-             {
-               // if((MasterRunning==0) && MasterRunning_old1 ) SystemFlag.bit.SOFTSTART = TRUE;
-                 referenceV = soft_VdcRef;
-                 referenceI = soft_IdcRef;
-             }
-         MasterRunning_old1 = MasterRunning;
-//-------------------------------------------
-         pid_vdc.Ref = referenceV;
-         pid_vdc.Fbk =  vdcFbk;//lpf_vdc.y;
-         piCon(&pid_vdc);
-
-         pid_idc.Ref = referenceI;
-         pid_idc.Fbk =  IdcFback;
-         piCon(&pid_idc);
-
-         pid_ibat.Ref = Ibat_Ref;
-         pid_ibat.Fbk =  ibatFbk; //lpf_ibat.y;
-         piCon(&pid_ibat);
-
-     if(CurrentSensingMode)
-     {
-         pid_idc1.Ref = Idc1_2_Ref;
-         pid_idc1.Fbk =  idc1Fbk;
-         piCon(&pid_idc1);
-         pid_idc2.Ref = Idc1_2_Ref;
-         pid_idc2.Fbk =  idc2Fbk;
-         piCon(&pid_idc2);
-     }
-     else { pid_idc1.Out = 1.0; pid_idc2.Out = 1.0; }
-
-
-     res_pid = pid_vdc.Out; LmtMode = 0; SystemFlag.bit.IBATMODE = FALSE;
-     if(res_pid > pid_idc.Out)  { res_pid = pid_idc.Out; LmtMode = 1; }
-     if(res_pid > pid_ibat.Out) { res_pid = pid_ibat.Out; LmtMode = 2; SystemFlag.bit.IBATMODE = TRUE; }
-     if(res_pid > pid_idc1.Out) { res_pid = pid_idc1.Out; LmtMode = 3; }
-     if(res_pid > pid_idc2.Out) { res_pid = pid_idc2.Out; LmtMode = 4; }
-
-     if(address==2)
-     {
-         switch(LmtMode)
-         {
-             case 0:
-                 pid_idc.ui = pid_vdc.ui;
-                 pid_ibat.ui = pid_vdc.ui;
-                 break;
-             case 1:
-                 pid_vdc.ui = pid_idc.ui;
-                 pid_ibat.ui = pid_idc.ui;
-                 break;
-             case 2:
-                 pid_vdc.ui = pid_idc.ui;
-                 pid_idc.ui = pid_idc.ui;
-                 break;
-             default:
-                 break;
-         }
-     }
 
 //-----------------------------------------------------------------
 
-         countPtr = res_pid * 4000;
 
-         if(OpenLoop)
-             {
-                 tmpCount = COS_TABLE[(FiringAngle << 2)];
-                 AlphaCount = tmpCount + SyncCorrection;
-                 LimitFlag.bit.OPENLOOP = TRUE;
-             }
-         else
-             {
-                 tmpCount = COS_TABLE[countPtr];
-                 AlphaCount = tmpCount + SyncCorrection;
-                 LimitFlag.bit.OPENLOOP = FALSE;
-             }
+void PR_Reset(void)
+{
+    Uint16 h;
+
+    prF[0].Y = 0; prF[0].X = 0; prF[0].out = 0;
+    prF[1].Y = 0; prF[1].X = 0; prF[1].out = 0;
+    for(h = 0; h < PR_NHARM; h++)
+    {
+        prH[h][0].Y = 0; prH[h][0].X = 0; prH[h][0].out = 0;
+        prH[h][1].Y = 0; prH[h][1].X = 0; prH[h][1].out = 0;
+    }
+}
+
+/*
+ Resonator coefficients, frequency adaptive. Called every 1ms.
+ w is the per-sample angle increment used by pll_and_sincos()
+ */
+void PR_UpdateCoeffs(void)
+{
+    float32_t w, wh, phi;
+    Uint16 h;
+
+    if((Master==1) || !CommStatus.bit.CAN_MASTER) w = omega_inv;
+    else w = remoteOmega;
+    if((w < PLL_LOCK_MIN*0.9) || (w > PLL_LOCK_MAX*1.1)) w = OMEGADEFAULT;
+
+    prCoefF.a = 2.0*sinf(0.5*w);
+    phi = w*pr_delay;
+    prCoefF.c = cosf(phi);
+    prCoefF.s = sinf(phi);
+
+    for(h = 0; h < PR_NHARM; h++)
+    {
+        float32_t phExtra;      // per-harmonic plant phase correction, degrees
+
+        if(h == 0)      phExtra = pr_ph5;
+        else if(h == 1) phExtra = pr_ph7;
+        else            phExtra = pr_ph11;      // 11th and 13th
+
+        wh = prOrder[h]*w;
+        prCoefH[h].a = 2.0*sinf(0.5*wh);
+        phi = wh*pr_delay + phExtra*(PI/180.0);
+        prCoefH[h].c = cosf(phi);
+        prCoefH[h].s = sinf(phi);
+    }
+
+    prKF = 2.0*inv_ki;
+    prKH = pr_kh;
+    prWd = 2.0*pr_wc*SAMPLING_TIME;
+    prHMask = (Uint16) pr_hMask;
+
+#ifdef SHIFTED_FBACK
+    prRotC = cosf(Angle30);
+    prRotS = sinf(Angle30);
+#else
+    prRotC = 1.0;
+    prRotS = 0.0;
+#endif
+}
+
+inline void rmsCal(void)
+{
+
+    /* Accumulate squared value of grid voltages for mean square */
+    // inverter voltages without the common-mode part (vol.z, from the trimmed
+    // feedback), converted back to each channel's own scale for its scale factor
+    UPDATE_RMS(volt_meter_R, (vcontrol.vol.a - vcontrol.vol.z));
+    UPDATE_RMS(volt_meter_Y, (vcontrol.vol.b - vcontrol.vol.z) * fbTrimYinv);
+    UPDATE_RMS(volt_meter_B, (vcontrol.vol.c - vcontrol.vol.z) * fbTrimBinv);
+    UPDATE_RMS(cur_meter_R, lpf_iInvR.y);
+    UPDATE_RMS(cur_meter_Y, lpf_iInvY.y);
+    UPDATE_RMS(cur_meter_B, lpf_iInvB.y);
+
+
+    UPDATE_RMS(iout_meter_R, lpf_ioutR.y);
+    UPDATE_RMS(iout_meter_Y, lpf_ioutY.y);
+    UPDATE_RMS(iout_meter_B, lpf_ioutB.y);
+
+    UPDATE_RMS(vout_meter_R, vOutR);
+    UPDATE_RMS(vout_meter_Y, vOutY);
+    UPDATE_RMS(vout_meter_B, vOutB);
+
+    UPDATE_RMS(vll_meter_R, (vOutR - vOutY));
+    UPDATE_RMS(vll_meter_Y, (vOutY - vOutB));
+    UPDATE_RMS(vll_meter_B, (vOutB - vOutR));
+
+    UPDATE_RMS(vbyp_meter_R, lpf_vbypR.y);
+    UPDATE_RMS(vbyp_meter_Y, lpf_vbypY.y);
+    UPDATE_RMS(vbyp_meter_B, lpf_vbypB.y);
+
+    vry = (lpf_vbypR.y - lpf_vbypY.y);
+    vyb = (lpf_vbypY.y - lpf_vbypB.y);
+    vbr = (lpf_vbypB.y - lpf_vbypR.y);
+
+    UPDATE_RMS(vllb_meter_R, vry);
+    UPDATE_RMS(vllb_meter_Y, vyb);
+    UPDATE_RMS(vllb_meter_B, vbr);
+
+    UPDATE_KW(kw_meter_R, vOutR, lpf_ioutR.y, VoutRSF, IoutRSF);
+    UPDATE_KW(kw_meter_Y, vOutY, lpf_ioutY.y, VoutYSF, IoutYSF);
+    UPDATE_KW(kw_meter_B, vOutB, lpf_ioutB.y, VoutBSF, IoutBSF);
+
+    if (rsync) {
+
+        rms_samplecount = volt_meter_R.sample_count;
+
+        SAVE_METER(volt_meter_R);
+        SAVE_METER(volt_meter_Y);
+        SAVE_METER(volt_meter_B);
+
+        SAVE_METER(cur_meter_R);
+        SAVE_METER(cur_meter_Y);
+        SAVE_METER(cur_meter_B);
+        SAVE_METER(vout_meter_R);
+        SAVE_METER(vout_meter_Y);
+        SAVE_METER(vout_meter_B);
+
+        SAVE_METER(vll_meter_R);
+        SAVE_METER(vll_meter_Y);
+        SAVE_METER(vll_meter_B);
+
+        SAVE_METER(vllb_meter_R);
+        SAVE_METER(vllb_meter_Y);
+        SAVE_METER(vllb_meter_B);
+
+        SAVE_METER(iout_meter_R);
+        SAVE_METER(iout_meter_Y);
+        SAVE_METER(iout_meter_B);
+        SAVE_METER(vbyp_meter_R);
+        SAVE_METER(vbyp_meter_Y);
+        SAVE_METER(vbyp_meter_B);
+
+        SAVE_METER(kw_meter_R);
+        SAVE_METER(kw_meter_Y);
+        SAVE_METER(kw_meter_B);
+
+        rms_update_flag = 1;
+        rsync = 0;
+    }
+
+}
+inline void pll_and_sincos(void)
+{
+        pllBypass.va =  lpf_vbypR.y;
+        pllBypass.vb =  lpf_vbypY.y;
+        pllBypass.vc =  lpf_vbypB.y;
+        pll_omega = phaseLockedLoopB(&pllBypass);
+
+if((Master==1) || !CommStatus.bit.CAN_MASTER)
+     {
+         Angle += omega_inv;
+         if(Angle>= TWOPI) Angle -= TWOPI;
+         angleActive =  Angle;
      }
-
-//interrupt void msOne_delay_isr(void)
-__interrupt void cpu_timer2_isr(void)
+else if(Master==0)
+     {
+         remoteAngle += remoteOmega;
+         if(remoteAngle >= TWOPI) remoteAngle -= TWOPI;
+         angleActive =  remoteAngle;// + PhaseShift;
+         Synced = TRUE;
+         SystemFlag.bit.NOTSYNCED = FALSE;
+         Angle = angleActive;
+     }
+    theta_inv.sin_val = sinf(angleActive);
+    theta_inv.cos_val = cosf(angleActive);
+}
+inline void CurrentModeSelection(void)
 {
-         //control();
-
-    ControlLoop();
-
-
-    if(canInitTimer) canInitTimer--;
-    if(iom1_canFailTimer) iom1_canFailTimer--;
-    if(iom2_canFailTimer) iom2_canFailTimer--;
-
-    if(canFailureCount<CANFailDelay) canFailureCount++;
-
-    if(TransTimer) TransTimer--;
-    if(TransTimer==1) Transition = FALSE;
-
-    if((milliseconds%BalancingRate)==0)
+    if(!SystemFlag.bit.LOADONINV && !SystemFlag.bit.LOADONBYP)
+               {
+                   if(VoutR > 180)MasterVoltagePresent = TRUE;
+                   else if(VoutR < 150) MasterVoltagePresent = FALSE;
+               }
+           if(!PairStatusFlag.bit.INVRTRDISABL && PairStatusFlag.bit.LOADONINV &&
+                   !PairStatusFlag.bit.OUTMCBOFF && PairStatusFlag.bit.BITSVALID) MasterOnline = TRUE;
+           else { MasterOnline = FALSE; MasterVoltagePresent = FALSE; }
+           if(MasterPresentTimer>10) CommStatus.bit.CAN_MASTER =  TRUE;
+           else CommStatus.bit.CAN_MASTER =  FALSE;
+    if( (Master==0) && MasterOnline && (vacHighFault==0) && !UPSFlag.bit.OUTMCBOFF)
     {
-        if(BalancingEnable && (CurrentSensingMode==1))
-                {
-                        ActiveBridgeBalancing();
-                        Bridge2LagCount =   Bridge2LagCount_1;
-                        Bridge2LeadCount =  Bridge2LeadCount_1;
+        if(MasterOnline && SystemFlag.bit.LOADONINV)
+               {
+                   if(currentMode==FALSE)
+                       {
+                           if(VoltCtrlMode > 0.5) cur.pi_de.ui = vcontrol.deo * 0.4;
+                           else cur.pi_de.ui = vcontrol.vol.pid_de.data.ui  * 0.4;
+                       }
+                   currentMode = TRUE;
+                   capCount = 0;
+                   CaptureNow = TRUE;
+               }
+           else  {
+                   if(currentMode) //leaving
+                   {
+                       vcontrol.vol.pid_de.data.i1 = Cur_De * 2.0;
+                       vcontrol.vol.pid_qe.data.i1 = Cur_Qe * 2.0;
+                       PR_PRELOAD();
+                   }
+                       currentMode = FALSE;
+                       capCount = 0;
+                       CaptureNow = TRUE;
                  }
-                else
+    } //voltage mode
+    else {
+                if(currentMode) //first entry to voltage mode
                 {
-                    Bridge2LagCount = 0;
-                    Bridge2LeadCount = 0;
-                    Bridge2LeadCount_1 = 0;
-                    Bridge2LagCount_1 = 0;
+                    vcontrol.vol.pid_de.data.i1 = Cur_De * 2.0;
+                    vcontrol.vol.pid_qe.data.i1 = Cur_Qe * 2.0;
+                    PR_PRELOAD();
                 }
-    }
-//-----------------------------------------------------------------------
-
-    milliseconds++;
-
-    if(eventCounter<2) eventCounter++;
-    if(msgCounter<PacketDelay) msgCounter++;
-
-
-    if((milliseconds%100)==0) updateLED = TRUE;
-
-    if(pwmEnabled)
-    {
-        if((milliseconds%100)==0) { GPIO_WritePin(62,2); }
-    }
-    else
-    {
-        if((milliseconds%500)==0) { GPIO_WritePin(62,2); }
-    }
-
-    if(OffsetNotDone && (poweronTimer>=2000) && (poweronTimer<3000))
-    {
-        offsets[0] += AnalogInput1 - BIASCHANNEL;
-        offsets[1] += AnalogInput2 - BIASCHANNEL;
-        offsets[2] += AnalogInput3 - BIASCHANNEL;
-        offsets[3] += AnalogInput4 - BIASCHANNEL;
-        offsets[4] += AnalogInput5 - BIASCHANNEL;
-        offsets[5] += AnalogInput6 - BIASCHANNEL;
-
-        if(poweronTimer==2999)
-        {
-            vrOffset = offsets[0]/1000;
-            vyOffset = offsets[1]/1000;
-            vbOffset = offsets[2]/1000;
-            irOffset = offsets[3]/1000;
-            iyOffset = offsets[4]/1000;
-            ibOffset = offsets[5]/1000;
-
-            OffsetNotDone = FALSE;
+                 currentMode = FALSE;
         }
-    }
-
-    if (spi_timeout < SPI_TIME)     spi_timeout++;
-    if(msDelayCount)    msDelayCount--;
-
-    zcdCount++;
-    if(zcdCount>21)
-    {
-        zcdCount = 0;
-    }
-
-      if (milliseconds> 999) {
-        milliseconds = 0;
-
-        if(AutoSaveTimer) AutoSaveTimer--;
-        if(AutoSaveTimer==1) autoSaveFlag = TRUE;
-
-        AdcIsrCount = temp_AdcIsrCount;
-        temp_AdcIsrCount = 0;
-        T0IsrCount = temp_T0IsrCount;
-        temp_T0IsrCount = 0;
-
-        T1IsrCount = temp_T1IsrCount;
-        temp_T1IsrCount = 0;
-
-        PidCount = tmp_pidcount;
-        tmp_pidcount = 0;
-
-        zcdCount1 = tmp_zcdCount;
-        tmp_zcdCount = 0;
-        zcdCount2 = tmp_zcdnCount;
-        tmp_zcdnCount = 0;
-
-        canRxCount = temp_canRxCount;
-        temp_canRxCount = 0;
-
-     //   if((seconds%5)==0) dummyEvent = TRUE;
-        LedFlag_old = 0;
-
-        seconds++;
-        if( seconds > 59)
-            {
-                seconds = 0;
-                Minutes++;
-                if(Minutes>59) Minutes = 0;
-
-                if(BoostTimer) BoostTimer--;
-                if(Batt_TestTimer) Batt_TestTimer--;
-                if(EqualizeTimer) EqualizeTimer--;
-            }
-        if(systemRunningTimer < FaultResetDelay) systemRunningTimer++;
-        if((systemRunningTimer == FaultResetDelay) && (SystemFlag.bit.LATCHFAULT == FALSE) ) TripCount = 0;
-
-            if(restartTimer)
-            {
-                restartTimer--;
-
-                if( (TripCount < MaxRestartCount) && (restartTimer==0))
-                {
-                    AUTO_RESET_FAULTS();
-
-                }
-            }
-
-             if(PrechargeTimer) PrechargeTimer--;
-
-
-        } //seconds change condition
-
-      checkDI_NO(DIpins[0],DI1timer,DIDELAY);
-      checkDI_NO(DIpins[1],DI2timer,DIDELAY);
-      checkDI(DIpins[2],DI3timer,DIDELAY);
-      checkDI(DIpins[3],DI4timer,DIDELAY);
-      checkDI(DIpins[4],DI5timer,DIDELAY);
-      checkDI(DIpins[5],DI6timer,DIDELAY);
-      checkDI(DIpins[6],DI7timer,DIDELAY);
-      checkDI(DIpins[7],DI8timer,DIDELAY);
-      checkDI(DIpins[8],DI9timer,DIDELAY);
-      checkDI(DIpins[9],DI10timer,DIDELAY);
-      // DI11 / DI12: not on the Common Controller v2 (DI01..DI10 only); timers stay 0
-
-
-    if(SystemFlag.bit.POWERINGUP)
-    {
-        if (poweronTimer < POWERONDELAY) poweronTimer++;
-    else SystemFlag.bit.POWERINGUP = FALSE;
-
-    }
-
-    if (interchar_silent_timer < INTERCHARDELAY)
-        interchar_silent_timer++;
-
-    if(WaitDelayTimer) WaitDelayTimer--;
-
-
-      CheckHiLo(&chkVr);
-      CheckHiLo(&chkVy);
-      CheckHiLo(&chkVb);
-      CheckHiLo(&chkVdc);
-      CheckHiLo(&chkVbat);
-      CheckHiLo(&chkVload);
-      CheckHiLo(&chkFrequency);
-
-          CheckHi(&chkIr);
-          CheckHi(&chkIy);
-          CheckHi(&chkIb);
-          CheckHi(&chkIdc);
-          CheckHi(&chkIbat);
-
-    if (interchar_silent_timer < INTERCHARDELAY) interchar_silent_timer++;
-    if (interchar_silent_timer1 < INTERCHARDELAY) interchar_silent_timer1++;
-
-    if( (milliseconds%10)==0) runModeSelect = TRUE;
-
-if((milliseconds%10)==0)
-{
-    if ( (SystemFlag.bit.SOFTSTART && (pwmEnabled==2)) || ReferenceChangedFlag)
-        {
-            softcounter++;
-            if(softcounter >= SoftstartInterval)
-            {
-                softcounter = 0;
-
-
-                if (soft_VdcRef < Vdc_Ref) soft_VdcRef += vdc_inc;
-                if(soft_VdcRef > Vdc_Ref) soft_VdcRef = Vdc_Ref;
-                if (soft_IdcRef < Idc_Ref) soft_IdcRef += idc_inc;
-                if(soft_IdcRef > Idc_Ref) soft_IdcRef = Idc_Ref;
-
-                soft_IbatRef = Ibat_Ref;
-                soft_IdcRef = Idc_Ref ;
-
-                if((soft_VdcRef == Vdc_Ref) && (soft_IdcRef == Idc_Ref) )
-                {
-                    SystemFlag.bit.SOFTSTART = 0;
-                    WaitDelayTimer = 3000;
-                    ReferenceChangedFlag = FALSE;
-                }
-            }
-        } //soft start
-
-    }//every 10ms
-
-            if(vol_Rph >0) vR_rectified = vol_Rph * RP1;
-            else vR_rectified = -vol_Rph * RN1;
-            if(vol_Yph >0) vY_rectified = vol_Yph * YP1;
-            else vY_rectified = -vol_Yph * YN1;
-            if(vol_Bph >0) vB_rectified = vol_Bph * BP1;
-            else vB_rectified = -vol_Bph * BN1;
-            vOutput = MAX3(vR_rectified, vY_rectified, vB_rectified);
-
 }
-volatile uint32_t sum_zcd_ticks = 0;
-
-__interrupt void ecap1ISR(void)
+inline void SendCANPackets(void)
 {
-    if(ECap1Regs.ECFLG.bit.CEVT1)
-    {
-       /* cap_now = ECAP_getEventTimeStamp(ECAP1_BASE, ECAP_EVENT_1);
-        dt_ticks = (uint32_t)(cap_now - cap_prev);   // unsigned handles wrap safely
-        cap_prev = cap_now;
-        tmp_zcdCount++;
+    //-------------------------------------------------------------------------------------
+              if(Master)
+                  {
+                                  if(canIntrval==0)
+                                      {
+                                          nptr = (long *) &Angle;
+                                          val1 = *nptr;
+                                          nptr = (long *) &omega_inv;
+                                          val2 = *nptr;
+                                          Id = 2;
+                                      }
+                                      if(canIntrval==8)
+                                      {
+                                          val1 = 0;
+                                          val1 = AlarmFlag2;
+                                          Nop();
 
-        sum_dt_ticks += dt_ticks;
-        sptr++;
-        if(sptr>=32) {sptr = 0; periodCount = (sum_dt_ticks >>5); sum_dt_ticks = 0; }
-        zcdCount1 = 0;
-        rsync = 1;
-        if (snap_end == 0) snap_start = 1;
-*/
-        ECap1Regs.ECCLR.bit.CEVT1 = 1;   // Clear rising flag
-    }
+                                          val1 <<=16;
+                                          Nop();
+                                          val1 |= (N16) UPSFlag.all;
+                                          Nop();
+                                          nptr = (long *) &cur.lpf_de.y;
+                                          val2 = *nptr;
+                                          Id = 3;
+                                      }
+                                  if(Id)
+                                          {
+                                               // CAN-B (MCANB), TX buffer 0: ID 2 = angle + omega,
+                                               // ID 3 = flags + Id current (mcanInterface.c)
+                                               if(ParTransmit(Id, val1, val2)) txMsgCount_tmp++;
+                                               Id = 0;
+                                          }
+                                  canIntrval++; canIntrval &= 0x00f;
+                      }
 
-        ECap1Regs.ECCLR.bit.INT = 1;
-        PieCtrlRegs.PIEACK.all = PIEACK_GROUP4;
-    // Clearing the interrupt event flags
+                       else //slave
+                           {
+                                       if(canIntrval==6)
+                                       {
+                                           val1 = AlarmFlag2;
+                                           val1 <<=16;
+                                           val1 |= (N16) UPSFlag.all;
+                                           nptr = (long *) &cur.lpf_de.y;
+                                           val2 = *nptr;
+                                           Id = 15;    // slave status: flags + Id current
+                                                if(ParTransmit(Id, val1, val2)) txMsgCount_tmp++;
+                                                Id = 0;
+                                         }
+                                   canIntrval++; canIntrval &= 0x001f;
+                           }
+    //-----------------------------------------------------------------------------------------------------------------
 
-}
-
+          }
 //===========================================================================
 // 							End of file
 //===========================================================================
