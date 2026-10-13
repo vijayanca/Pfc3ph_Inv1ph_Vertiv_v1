@@ -14,8 +14,9 @@
 #include "inc/hw_memmap.h"
 #include "sci.h"
 #include "SVGEN_CLA.h"
+#include "../controlCore.h"
 
-#ifdef _FLASH
+#if defined(_FLASH) && !CONTROL_ON_CLA
 #pragma CODE_SECTION(EPWM_INV_ISR, ".TI.ramfunc");
 #endif
 
@@ -34,98 +35,19 @@ volatile struct EPWM_REGS *ePWM[] = {
 #define SWFREQ10     10000
 #define SWFREQ12     4000
 #define DEADBAND_INV 375        // 2.5 us at TBCLK = 150 MHz
-//#define INV_PWM_PERIOD  SWFREQ8C
 
-//#define INV_HALFPERIOD  (INV_PWM_PERIOD >>1)
-
-SVGEN_CLA svgen_dq1;
-
-/*--------------------------------------------------------------------------
- Function Name: EPwmISR
- Description:   Handles the generation of PWM pulses as per details in
- the design document W20491_01_011_DesignDocumentv0.31.doc
- FreqAcc = (Generated Freq x Resolution) / Sampling Freq.
- Takes      :   None
- Returns        :   None
- Funcs Called:  None
-
- Author     :   Vijayan C A
- History Log:
- ---------------------------------------------------------------------------
- Date       | Modified By |         Comments
- ---------------------------------------------------------------------------
- 10/02/2012   VCA               Created
- ---------------------------------------------------------------------------*/
-
-// sign of the current, linear between -1 and +1 (input already divided by the band)
-static inline float dtSign(float x)
+#if !CONTROL_ON_CLA
+/*
+ Inverter modulator on the CPU (CONTROL_ON_CLA = 0), EPWM1 INT at counter zero:
+ SVPWM, dead-time compensation and CMPA update, controlCore.h ctl_pwm().
+ With CONTROL_ON_CLA = 1 the same code runs as CLA task 2 on the EPWM1 INT.
+ */
+interrupt void  EPWM_INV_ISR (void)
 {
-    if(x > 1.0) return 1.0;
-    if(x < -1.0) return -1.0;
-    return x;
+    ctl_pwm();
+    PieCtrlRegs.PIEACK.all = PIEACK_GROUP3;
 }
-
-interrupt void  EPWM_INV_ISR (void) {
-
-    float z = 0;
-
-    temp_fsw1++;
-
-#ifdef PHASE3PH
-    if(currentMode)
-    {
-        svgen_dq1.Ualpha = Cur_Alpha;
-        svgen_dq1.Ubeta = Cur_Beta;
-    }
-    else
-    {
-        RYB2AB_F(svgen_dq1.Ualpha,svgen_dq1.Ubeta,z,vcontrol.refa, vcontrol.refb, vcontrol.refc);
-    }
-    if(z) z = 0.0;
-    SVGEN_CLA_MACRO(svgen_dq1);
-    svgen_dq1.Ta = -svgen_dq1.Ta;
-    svgen_dq1.Tb = -svgen_dq1.Tb;
-    svgen_dq1.Tc = -svgen_dq1.Tc;
-
-    // Dead-time compensation: each leg loses Td/Tsw of duty against its current.
-    // Full correction in normalised units is DBRED/TBPRD (= 2*Td/Tsw); DtComp scales
-    // it and sets the sign (current sensor polarity). Linear within +/-DtBand amps
-    // so the correction does not chatter around current zero crossings.
-    if(DtComp != 0.0)
-    {
-        float dtGain = DtComp * (float)EPwm1Regs.DBRED.all / (float)EPwm1Regs.TBPRD;
-
-        svgen_dq1.Ta += dtGain * dtSign(lpf_iInvR.y * IinvRSF / DtBand);
-        svgen_dq1.Tb += dtGain * dtSign(lpf_iInvY.y * IinvYSF / DtBand);
-        svgen_dq1.Tc += dtGain * dtSign(lpf_iInvB.y * IinvBSF / DtBand);
-    }
-
-    if(svgen_dq1.Ta > SAT_LIMIT)  svgen_dq1.Ta = SAT_LIMIT;
-    if(svgen_dq1.Tb > SAT_LIMIT)  svgen_dq1.Tb= SAT_LIMIT;
-    if(svgen_dq1.Tc > SAT_LIMIT)  svgen_dq1.Tc = SAT_LIMIT;
-    if(svgen_dq1.Ta < SAT_LIMITN) svgen_dq1.Ta = SAT_LIMITN;
-    if(svgen_dq1.Tb < SAT_LIMITN) svgen_dq1.Tb = SAT_LIMITN;
-    if(svgen_dq1.Tc < SAT_LIMITN) svgen_dq1.Tc = SAT_LIMITN;
-
-    EPwm1Regs.CMPA.bit.CMPA = Inv_HalfPeriod*svgen_dq1.Ta + Inv_HalfPeriod;
-    EPwm2Regs.CMPA.bit.CMPA = Inv_HalfPeriod*svgen_dq1.Tb + Inv_HalfPeriod;
-    EPwm3Regs.CMPA.bit.CMPA = Inv_HalfPeriod*svgen_dq1.Tc + Inv_HalfPeriod;
-
-#else
-        if(currentMode)
-        {
-            vcontrol.refa = reference_current;
-        }
-
-
-        EPwm1Regs.CMPA.bit.CMPA = INV_HALFPERIOD * -vcontrol.refa + INV_HALFPERIOD;
-        EPwm2Regs.CMPA.bit.CMPA = INV_HALFPERIOD * vcontrol.refa + INV_HALFPERIOD;
 #endif
-
-    //---------------Reinitialize for next PWM sequence--------------
-        EPwm1Regs.ETCLR.bit.INT = 1;
-        PieCtrlRegs.PIEACK.all = PIEACK_GROUP3;
-}
 
 /*
  Hardware desaturation trip, Bridge 1 (Common Controller v2):

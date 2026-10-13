@@ -1,0 +1,50 @@
+/*
+ * cla_tasks.cla
+ *
+ * CLA1 tasks: the inverter control loop (controlCore.h) when CONTROL_ON_CLA = 1.
+ *   Task 1  ADCA INT1 (EPWM8 SOCA, 20 kHz): measurements, voltage / current
+ *           controllers, RMS accumulation. End of task -> CPU ClaTask1EndISR
+ *           (PLL, angles, sync, paralleling) for the next sample.
+ *   Task 2  EPWM1 INT (counter zero, inverter PWM rate): SVPWM, dead-time
+ *           compensation, CMPA of EPWM1-3.
+ *   Task 8  software, once from claInit(): state set up.
+ * Data: claShared.h (Cla1DataRam, RAMLS67). Set up by claInit.c.
+ * To halt the CLA under the debugger put __mdebugstop() in a task.
+ */
+
+#define CCEXTERN    extern
+#define INIT0
+#define INITARRAY0
+#include <stdint.h>          // before f28x_project.h: f28p55x_cla_typedefs.h uses uint16_t
+#include "f28x_project.h"
+#include "../inv3phParams.h"
+#include "../controlMacros.h"
+#include "../claShared.h"
+#include "../controlCore.h"
+
+#if CONTROL_ON_CLA
+
+__attribute__((interrupt)) void Cla1Task1(void)
+{
+    ctl_task1();
+    ctl.claT1Count++;
+    ctl.claT1Ticks = ctl_ticksSinceSoc();
+}
+
+__attribute__((interrupt)) void Cla1Task2(void)
+{
+    ctl_pwm();
+}
+
+__attribute__((interrupt)) void Cla1Task3(void) { }
+__attribute__((interrupt)) void Cla1Task4(void) { }
+__attribute__((interrupt)) void Cla1Task5(void) { }
+__attribute__((interrupt)) void Cla1Task6(void) { }
+__attribute__((interrupt)) void Cla1Task7(void) { }
+
+__attribute__((interrupt)) void Cla1Task8(void)
+{
+    ctl_init();
+}
+
+#endif

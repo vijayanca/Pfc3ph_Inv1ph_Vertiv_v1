@@ -27,6 +27,8 @@
  External Function Declarations here
  ------------------------------------------------------------------------------*/
 #define	CCEXTERN
+#define CLA_SHARED_DEFINE       // claShared.h: define the CPU/CLA shared variables here
+#define CLA_SHARED_DEFINE       // claShared.h: define the CPU/CLA shared variables here
 #define	INIT0	= 0
 #define	INITARRAY0 = {0}
 #define MATH_TYPE FLOAT_MATH
@@ -35,15 +37,21 @@
 #include "../ccVariables.h"
 #include "device.h"
 #include "math.h"
+#include "../controlCore.h"
 extern __interrupt void MCANIntr1ISR(void);    // CAN-B paralleling RX
 extern __interrupt void MCANARxISR(void);      // CAN-A display writes
+#if CONTROL_ON_CLA
+extern __interrupt void ClaTask1EndISR(void); // CLA task 1 (control sample) done
+void claInit(void);
+#else
 extern __interrupt void AdcISR(void);
+extern __interrupt void EPWM_INV_ISR(void);
+#endif
 extern __interrupt void SCIRxISR(void);
 extern __interrupt void SCIBRx_ISR(void);
 extern __interrupt void cpu_timer0_isr(void);
 extern __interrupt void cpu_timer1_isr(void);
 extern __interrupt void cpu_timer2_isr(void);
-extern __interrupt void EPWM_INV_ISR(void);
 void storeEvents(void);
 void EventLogging(void);
 
@@ -55,8 +63,6 @@ extern const PARAM defaultValues[];
 char tchr[16];
 
 #ifdef _FLASH
-#pragma DATA_SECTION(ArrayParamsF, "BIG_ARRAYS")
-#pragma DATA_SECTION(ArrayParamsI, "BIG_ARRAYS")
 #pragma DATA_SECTION(waveBuffer, "BIG_ARRAYS")
 #pragma DATA_SECTION(rx_buffer, "BIG_ARRAYS")
 #endif
@@ -120,8 +126,12 @@ char tchr[16];
 	PieVectTable.TIMER1_INT = &cpu_timer1_isr;
 	PieVectTable.TIMER2_INT = &cpu_timer2_isr;
 
+#if CONTROL_ON_CLA
+    PieVectTable.CLA1_1_INT = &ClaTask1EndISR;  // control sample done (CLA task 1)
+#else
     PieVectTable.EPWM1_INT = &EPWM_INV_ISR;
     PieVectTable.ADCA1_INT = &AdcISR;
+#endif
     PieVectTable.SCIA_RX_INT = &SCIRxISR;
     PieVectTable.SCIB_RX_INT = &SCIBRx_ISR;
     PieVectTable.MCANB_0_INT = &MCANIntr1ISR;   // paralleling RX on CAN-B
@@ -148,9 +158,15 @@ char tchr[16];
 
 EALLOW;
 	//xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+#if CONTROL_ON_CLA
+    // ADCA1 and EPWM1 INT trigger CLA tasks 1 / 2 (claInit), not CPU ISRs
+    PieCtrlRegs.PIEIER11.bit.INTx1 = 1;  // 11.1 CLA1_1: CLA task 1 end
+    PieCtrlRegs.PIEIER1.bit.INTx7 = 1;   // 1.7 TIMER0
+#else
 	PieCtrlRegs.PIEIER1.bit.INTx1 = 1;   // 1.1 ADCA1
     PieCtrlRegs.PIEIER1.bit.INTx7 = 1;   // 1.7 TIMER0
 	PieCtrlRegs.PIEIER3.bit.INTx1 = 1;   // 3.1 EPWM1 (inverter modulator)
+#endif
 	PieCtrlRegs.PIEIER9.bit.INTx1 = 1;   // 9.1 SCIA RX
     PieCtrlRegs.PIEIER9.bit.INTx3 = 1;   // 9.3 SCIB RX
     PieCtrlRegs.PIEIER9.bit.INTx8 = 1;   // 9.8 MCANA_1: CAN-A display writes
@@ -163,12 +179,22 @@ EALLOW;
 
     //Enable CPU INT3 which is connected to EPwm1-3 INT:trip
 
+#if CONTROL_ON_CLA
+    IER |= M_INT11; // CLA1 end-of-task
+#else
     IER |= M_INT3; // Enable CPU INT3 for PWM
+#endif
     IER |= M_INT1; // Enable CPU Interrupt 0
     IER |= M_INT9; //serial + CAN
     IER |= M_INT13; // Enable CPU Timer 1;
     IER |= M_INT14; // Enable CPU Timer 2;
 EDIS;
+
+#if CONTROL_ON_CLA
+    claInit();      // CLA memory, task vectors, triggers; runs ctl_init() as task 8
+#else
+    ctl_init();
+#endif
 
 	EINT;
 	// Enable global Interrupts and higher priority

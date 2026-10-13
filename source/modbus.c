@@ -426,13 +426,13 @@ void snapShot(N16 st_addr)
 switch(st_addr & 0xFF)
 	{
 		case 0:
-			waveptr =  &plot0;
+			waveptr =  (float32_t *) &plot0;
 			break;
 		case 1:
-			waveptr =  &plot1;
+			waveptr =  (float32_t *) &plot1;
 			break;
 		case 2:
-			waveptr =  &plot2;
+			waveptr =  (float32_t *) &plot2;
 			break;
 		case 3:
 			waveptr =  &plot3;

@@ -54,9 +54,9 @@
 
 
 #define RYB2AB_F(alpha,beta,z,r,y,b)         \
-    alpha = 0.6666666666 * r - 0.3333333333*y - 0.3333333333*b;    \
-    beta  = 0.57735026913 * (y - b);          \
-    z     = 0.33333333333*(r + y + b)
+    alpha = 0.6666666666f * r - 0.3333333333f*y - 0.3333333333f*b;    \
+    beta  = 0.57735026913f * (y - b);          \
+    z     = 0.33333333333f*(r + y + b)
 
 #define AB2DQN_F(d,q,a,b,s)   \
     d =  -a*s.sin_val - b*s.cos_val;  \
@@ -76,8 +76,8 @@
 
 #define AB2RYB_F(a,b,c,alpha,beta)        \
     a = alpha;                           \
-    b = -0.5*alpha + 0.86602540378*beta; \
-    c = -0.5*alpha - 0.86602540378*beta
+    b = -0.5f*alpha + 0.86602540378f*beta; \
+    c = -0.5f*alpha - 0.86602540378f*beta
 
 #define CLARKE_LINEV_MACRO_old(alpha,beta,vr,vy) \
     alpha =  vr*0.66666666667 + vy*0.3333333333; \

@@ -17,6 +17,7 @@
 #include "inv3phParams.h"
 #include "pll3ph.h"
 #include "controlMacros.h"
+#include "claShared.h"
 #include "BoardMacros.h"
 
 
@@ -26,22 +27,15 @@ CCEXTERN    volatile Uint16 InputOK_timer INIT0;
 CCEXTERN    volatile Uint16 inverterOK INIT0;
 CCEXTERN    volatile Uint16 canHWDone INIT0;
 
-CCEXTERN   volatile N16 Inv_HalfPeriod INIT0;
 CCEXTERN   volatile N16 InvPwmPeriod INIT0;
-CCEXTERN   volatile N16 DCOVTimer INIT0;
 CCEXTERN   volatile N16 OffsetNotDone INIT0;
 
 
 CCEXTERN    long offsets[20] INITARRAY0;
-CCEXTERN    N16 temp_fsw1 INIT0;
 CCEXTERN    N16 capCount INIT0;
 CCEXTERN    volatile N16 temp_AdcIsrCount INIT0;
 CCEXTERN    volatile N16 temp_T0IsrCount INIT0;
 
-// Sized for the CAN-A display broadcast (mcanInterface.c: ArrayParamsF[0..239],
-// ArrayParamsI[0..399]); the inverter map uses the first NPARAMS of each
-CCEXTERN    float32_t ArrayParamsF[NPARAMS + 50] INITARRAY0;
-CCEXTERN    int ArrayParamsI[NPARAMS + NPARAMS] INITARRAY0;
 CCEXTERN    int DOParams[NPARAMS] INITARRAY0;
 CCEXTERN    int DIParams[NPARAMS] INITARRAY0;
 
@@ -55,8 +49,6 @@ CCEXTERN    eventPacket Events[4];
 CCEXTERN    eventPacket EventTX;
 
 CCEXTERN    volatile float32_t    reference_current INIT0;
-CCEXTERN    harmonic cur;
-CCEXTERN    harmonic cur_neg;
 CCEXTERN    volatile float32_t dummy_comp INIT0;
 CCEXTERN    volatile float32_t curAlpha INIT0;
 CCEXTERN    volatile float32_t curBeta INIT0;
@@ -71,9 +63,6 @@ CCEXTERN    LPF32 lpf32_ioutr,lpf32_iouty, lpf32_ioutb;
 CCEXTERN    LPF32 lpf32_vbypr,lpf32_vbypy, lpf32_vbypb;
 CCEXTERN    LPF32 lpf32_vbypry,lpf32_vbypyb, lpf32_vbypbr;
 
-CCEXTERN    volatile float32_t vry INIT0;
-CCEXTERN    volatile float32_t vyb INIT0;
-CCEXTERN    volatile float32_t vbr INIT0;
 
 CCEXTERN    volatile Uint16 DItimers[16] INITARRAY0;
 CCEXTERN    volatile Uint16 DIpins[16] INITARRAY0;
@@ -158,10 +147,6 @@ CCEXTERN    float32_t LowDelay INIT0;
 CCEXTERN    volatile float32_t    res_Ds INIT0;
 CCEXTERN    volatile float32_t    res_Qs INIT0;
 
-CCEXTERN    float32_t  ffvd INIT0;
-CCEXTERN    float32_t  ccvq INIT0;
-CCEXTERN    float32_t  ccvd INIT0;
-CCEXTERN    float32_t  cross INIT0;
 CCEXTERN    float32_t harm_ref_de INIT0;
 
 CCEXTERN    int harm_select INIT0;
@@ -194,17 +179,9 @@ CCEXTERN    float32_t sumDCR   INIT0;
 CCEXTERN    float32_t sumDCY   INIT0;
 CCEXTERN    float32_t sumDCB   INIT0;
 
-CCEXTERN    LPF lpf_vInvR, lpf_vInvY, lpf_vInvB;
-CCEXTERN    LPF lpf_iInvR, lpf_iInvY, lpf_iInvB;
-CCEXTERN    LPF lpf_ioutR, lpf_ioutY, lpf_ioutB;
-CCEXTERN    LPF lpf_voutR, lpf_voutY, lpf_voutB;
-CCEXTERN    LPF lpf_vbypR, lpf_vbypY, lpf_vbypB;
 
-CCEXTERN    LPF lpf_dclink, lpf_vbat, lpf_ibat;
-CCEXTERN    LPF lpf_temp1, lpf_temp2;
 CCEXTERN    LPF lpf_curRef;
 
-CCEXTERN    LPF lpf_bias;
 CCEXTERN    LPF lpf_Freq;
 //CCEXTERN    LPF lpf_vout_de;
 //CCEXTERN    LPF lpf_vout_qe;
@@ -276,9 +253,6 @@ CCEXTERN     float32_t betaVbyp INIT0;
 #endif
 
 CCEXTERN    volatile float32_t waveBuffer[100] INITARRAY0; //50
-CCEXTERN    float32_t vOutR INIT0;      // output voltages with SVPWM common mode removed
-CCEXTERN    float32_t vOutY INIT0;      // (measurement / plots only, see AdcISR)
-CCEXTERN    float32_t vOutB INIT0;
 CCEXTERN    volatile float32_t phasShift INIT0;
 
 CCEXTERN    volatile float32_t FrequencyF INIT0;
@@ -291,16 +265,8 @@ CCEXTERN    volatile int VrMax INIT0;
 CCEXTERN    volatile int midPoint INIT0;
 CCEXTERN    volatile int biasNew INIT0;
 
-CCEXTERN    rms_meter volt_meter_R, volt_meter_Y, volt_meter_B;
-CCEXTERN    rms_meter cur_meter_R, cur_meter_Y, cur_meter_B;
 
-CCEXTERN    rms_meter iout_meter_R, iout_meter_Y, iout_meter_B;
-CCEXTERN    rms_meter vout_meter_R, vout_meter_Y, vout_meter_B;
-CCEXTERN    rms_meter vllb_meter_R, vllb_meter_Y, vllb_meter_B;
-CCEXTERN    rms_meter vll_meter_R, vll_meter_Y, vll_meter_B;
 
-CCEXTERN    rms_meter vbyp_meter_R, vbyp_meter_Y, vbyp_meter_B;
-CCEXTERN    rms_meter kw_meter_R, kw_meter_Y, kw_meter_B;
 
 CCEXTERN    N16 _RTCSecond INIT0;
 CCEXTERN    N16 _RTCMinute INIT0;
@@ -312,11 +278,8 @@ CCEXTERN    N16 _RTCYear INIT0;
 CCEXTERN    N16 LCDMsg3 INIT0;
 CCEXTERN    N16 msg3ptr INIT0;
 
-CCEXTERN    volatile Uint16 rms_samplecount INIT0;
-CCEXTERN    volatile Uint16 rms_update_flag INIT0;
 CCEXTERN    volatile Uint16 frame_complete INIT0;
 CCEXTERN    volatile Uint16 live_frame INIT0;
-CCEXTERN    volatile Uint16 rsync INIT0;
 CCEXTERN    volatile Uint16 old_ms INIT0;
 CCEXTERN    volatile Uint16 delayCount INIT0;
 CCEXTERN    volatile Uint16 delayCount1 INIT0;
@@ -454,11 +417,8 @@ CCEXTERN    Uint16 FirstTime INIT0;
 CCEXTERN    Uint16 mainLoopCount_prev INIT0;
 CCEXTERN    Uint16 period INIT0;
 CCEXTERN    Uint16 mainsFailTimer INIT0;
-CCEXTERN    Uint16 vacHighFault INIT0;
-CCEXTERN    Uint16 vachighTripCount INIT0;
 CCEXTERN    Uint16 CANOKtimer INIT0;
 CCEXTERN    Uint16 CANReset INIT0;
-//CCEXTERN    Uint16 vachighTripCount INIT0;
 
 CCEXTERN    volatile float32_t DMinVal INIT0;
 CCEXTERN    volatile float32_t QMaxVal INIT0;
@@ -473,45 +433,28 @@ CCEXTERN    PARSTAT  UPSFlag;
 CCEXTERN    PARSTAT  PairStatusFlag;
 CCEXTERN    COMMMODE CommStatus;
 
-CCEXTERN    sincos theta_inv;
 CCEXTERN    sincos theta_inv1s;
 
-#ifdef SHIFTED_FBACK
-    CCEXTERN    sincos theta_fb;
-    CCEXTERN    sincos theta_fb_120;
-    CCEXTERN    sincos theta_fb_240;
-#else
-    CCEXTERN    sincos theta_inv_120;
-    CCEXTERN    sincos theta_inv_240;
-#endif
 
-CCEXTERN    float32_t inverterFailLevel   INIT0;
 CCEXTERN    float32_t bypassFailLevel   INIT0;
 CCEXTERN    volatile float32_t    sin_val_old INIT0;
 
 CCEXTERN    float32_t *waveptr;
 CCEXTERN    volatile float32_t    bypSin INIT0;
 CCEXTERN    volatile float32_t    bypCos INIT0;
-CCEXTERN    volatile float32_t    Cur_Alpha INIT0;
-CCEXTERN    volatile float32_t    Cur_Beta INIT0;
-CCEXTERN    volatile float32_t    Cur_neg_Alpha INIT0;
-CCEXTERN    volatile float32_t    Cur_neg_Beta INIT0;
 
 CCEXTERN    volatile float32_t stat_current_zero INIT0;
 CCEXTERN    volatile float32_t stat_current_d INIT0;
 CCEXTERN    volatile float32_t stat_current_q INIT0;
-CCEXTERN    volatile float32_t soft_VdRef INIT0;
 CCEXTERN    volatile float32_t soft_VqRef INIT0;
 CCEXTERN    volatile float32_t deSoftRef INIT0;
 
 CCEXTERN    volatile float32_t    volRef_Iq   INIT0;
 CCEXTERN    volatile float32_t    volRef_Id   INIT0;
 CCEXTERN    volatile float32_t    defaultOmega   INIT0;
-CCEXTERN    volatile float32_t    addOn   INIT0;
 
 CCEXTERN    volatile float32_t    vbeta_bypass   INIT0;
 
-CCEXTERN    VolControl vcontrol;
 CCEXTERN    pllBlock  pllBypass;
 
 CCEXTERN PIreg pi_vbat;
@@ -541,15 +484,6 @@ CCEXTERN    MIN_MAX chkIbat;
 CCEXTERN    MIN_MAX chkVbat;
 CCEXTERN    MIN_MAX chkVbatpre;
 CCEXTERN    MIN_MAX chkdcLink;
-CCEXTERN    PR_STATE prF[2];                 // fundamental resonator, alpha/beta
-CCEXTERN    PR_STATE prH[PR_NHARM][2];       // harmonic resonators, alpha/beta
-CCEXTERN    PR_COEF  prCoefF;
-CCEXTERN    PR_COEF  prCoefH[PR_NHARM];
-CCEXTERN    float32_t prKF;                  // fundamental resonant gain (2*inv_ki)
-CCEXTERN    float32_t prKH;                  // harmonic resonant gain
-CCEXTERN    float32_t prWd;                  // resonator damping 2*wc*Ts
-CCEXTERN    float32_t prRotC, prRotS;        // cos/sin of feedback rotation (Angle30)
-CCEXTERN    Uint16    prHMask;
 
 
 CCEXTERN    MCAN_RxBufElement rxMsg[1];

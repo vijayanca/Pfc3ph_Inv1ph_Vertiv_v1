@@ -22,7 +22,7 @@ typedef struct 	{ float  Ualpha; 			// Input: reference alpha-axis phase voltage
 
 #define SVGEN_CLA_MACRO(v)														\
 	v.tmp1= v.Ubeta;															\
-	v.tmp2= v.Ubeta*0.5 + ((0.866)*v.Ualpha);									\
+	v.tmp2= v.Ubeta*0.5f + ((0.866f)*v.Ualpha);									\
     v.tmp3= v.tmp2 - v.tmp1;													\
 																				\
 	v.VecSector=3;																\
