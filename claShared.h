@@ -152,6 +152,7 @@ typedef struct
     float32_t pllQeComp;        // pllBypass.lpf1.y, q-axis feed-forward
     float32_t dtGain;           // dead-time compensation DtComp*DBRED/TBPRD
     float32_t dtBandInv;        // 1/DtBand
+    float32_t olModMax;         // open-loop test modulation limit (OL_MOD_MAX at start up)
     uint16_t  prHMask;
     uint16_t  ctlSoftStart;     // SystemFlag.bit.SOFTSTART
     uint16_t  Inv_HalfPeriod;   // inverter TBPRD/2

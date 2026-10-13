@@ -255,7 +255,7 @@ CORE_INLINE void ctl_voltage(void)
         if(pwmEnabled)
         {
             olMod += (float32_t)OL_MOD_STEP;
-            if(olMod > (float32_t)OL_MOD_MAX) olMod = (float32_t)OL_MOD_MAX;
+            if(olMod > ctl.olModMax) olMod = ctl.olModMax;     // limit settable in RAM
         }
         else olMod = 0.0f;
 
@@ -587,6 +587,7 @@ CORE_INLINE void ctl_init(void)
     prActive = 0;
     olActive = 0;
     olMod = 0.0f;
+    ctl.olModMax = (float32_t)OL_MOD_MAX;
     ctl.invFailEvt = 0;
     ctl.claLayout = (uint16_t)sizeof(CTL_SHARED);
 }
