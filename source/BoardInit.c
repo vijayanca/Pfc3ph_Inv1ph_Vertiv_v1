@@ -35,7 +35,7 @@
 //--------------------------------------------------------------------------
 // RS485 direction control (ISO3082: DE and /RE tied, 1 = transmit)
 //   RS485 #1 : SCIB, TXEN1 = GPIO40
-//   RS485 #2 : SCIA, TXEN  = GPIO34  (EnableTX()/DisableTX() in rectDefines.h)
+//   RS485 #2 : SCIA, TXEN  = GPIO34  (EnableTX()/DisableTX() in inv3phDefines.h)
 //--------------------------------------------------------------------------
 #define SCIA_TX_ENABLE()    GPIO_WritePin(RS485_2_TXEN_GPIO, 1)
 #define SCIA_TX_DISABLE()   GPIO_WritePin(RS485_2_TXEN_GPIO, 0)
@@ -183,6 +183,18 @@ void GpioInit(void)
     GPIO_setAnalogMode(20U, GPIO_ANALOG_DISABLED);
     GPIO_setPinConfig(GPIO_21_GPIO21);              // pin 49  DI_3
     GPIO_setAnalogMode(21U, GPIO_ANALOG_DISABLED);
+
+    // AGPIO pins used as digital signals -> analog mode OFF. On the F28P55x
+    // GPIO11/12/13/16/17/24/28 come out of reset in analog mode (GPAAMSEL = 1):
+    // the digital buffers are disconnected (outputs float to the board
+    // pull-downs, inputs read 0).
+    GPIO_setAnalogMode(11U, GPIO_ANALOG_DISABLED);  // pin 52  PWM12  EPWM6B (bridge 2)
+    GPIO_setAnalogMode(12U, GPIO_ANALOG_DISABLED);  // pin 51  STAT_INV EPWM7A
+    GPIO_setAnalogMode(13U, GPIO_ANALOG_DISABLED);  // pin 50  STAT_BYP EPWM7B
+    GPIO_setAnalogMode(16U, GPIO_ANALOG_DISABLED);  // pin 54  SPIA SIMO (EEPROM)
+    GPIO_setAnalogMode(17U, GPIO_ANALOG_DISABLED);  // pin 55  SPIA SOMI (EEPROM)
+    GPIO_setAnalogMode(24U, GPIO_ANALOG_DISABLED);  // pin 56  RLY3
+    GPIO_setAnalogMode(28U, GPIO_ANALOG_DISABLED);  // pin 1   SCIA RXD (RS485 #2)
     EDIS;
 
     //------------ DIGITAL INPUTS (opto DI01..DI10) --------------------------
@@ -241,7 +253,7 @@ void InitFaultXbar(void)
 void InitSCIA(N16 Baud)
 {
     // SCIA fixed at 115200 baud; the Baud argument (BaudRate parameter) is ignored.
-    N16 baudCount = BAUD115200;
+    N16 baudCount = BAUD38400;
     (void)Baud;
 
     EALLOW;
@@ -382,17 +394,10 @@ void ConfigureADC(void)
  *  D   Vr_inv D14  Vb_out D15  Vy_out D12  Ibat D11        -
  *  E   Ib_ind E11  Vy_inv E12  Vr_out E16  -               -
  *
- * 12-pulse rectifier assignment (NU = not used, SOC not configured):
- *
- *        SOC0          SOC1          SOC2          SOC3          SOC4
- *  A   Idc1   A0     Iinp_R A5     Iinp_B A8     Vload  A14    Temp1 A9
- *  B   Vinp_B B3     Iinp_Y B8     NU     B9     Vref1.5 B0    Temp3 B1
- *  C   Idc2   C5     Vdc    C0     NU     C9     Vbat   C2     Temp2 C8
- *  D   Vinp_R D14    NU     D15    NU     D12    Ibat   D11    -
- *  E   NU     E11    Vinp_Y E12    NU     E16    -             -
- *
- * Results are read in AdcISR (interrupt.c) into AnalogInput1..18 (labels in
- * RectParams.h). EOC: ADCA INT1 on EOC4 (ADC-A has the most conversions).
+ * 3-phase inverter: all channels of the table above are converted (A14 reads
+ * Vb_byp, selected by a link on the board). Results are read in AdcISR
+ * (interrupt.c) into AnalogInput1..21 (labels in inv3phParams.h).
+ * EOC: ADCA INT1 on EOC4 (A, B, C each have 5 conversions; D, E finish earlier).
  */
 #define SET_SOC(REGS, N, CH)                        \
     REGS.ADCSOC##N##CTL.bit.CHSEL   = (CH);         \
@@ -403,30 +408,36 @@ void setupADC(uint16_t trig_sel, uint16_t acqps)
 {
     EALLOW;
     //---------- ADC-A ----------------------------------------------------
-    SET_SOC(AdcaRegs, 0, IR_IND_ADC_CH);        // A0   Idc1   (bridge 1)
-    SET_SOC(AdcaRegs, 1, IR_OUT_ADC_CH);        // A5   Iinp_R
-    SET_SOC(AdcaRegs, 2, IB_OUT_ADC_CH);        // A8   Iinp_B
-    SET_SOC(AdcaRegs, 3, VB_BYP_VLOAD_ADC_CH);  // A14  Vload  (selected by a link on the board, not by RLY11/RLY12)
+    SET_SOC(AdcaRegs, 0, IR_IND_ADC_CH);        // A0   Ir_ind
+    SET_SOC(AdcaRegs, 1, IR_OUT_ADC_CH);        // A5   Ir_out
+    SET_SOC(AdcaRegs, 2, IB_OUT_ADC_CH);        // A8   Ib_out
+    SET_SOC(AdcaRegs, 3, VB_BYP_VLOAD_ADC_CH);  // A14  Vb_byp (link on the board, not RLY11/RLY12)
     SET_SOC(AdcaRegs, 4, TEMP1_ADC_CH);         // A9   Temp1
 
     //---------- ADC-B ----------------------------------------------------
-    SET_SOC(AdcbRegs, 0, VB_INV_ADC_CH);        // B3   Vinp_B
-    SET_SOC(AdcbRegs, 1, IY_OUT_ADC_CH);        // B8   Iinp_Y
+    SET_SOC(AdcbRegs, 0, VB_INV_ADC_CH);        // B3   Vb_inv
+    SET_SOC(AdcbRegs, 1, IY_OUT_ADC_CH);        // B8   Iy_out
+    SET_SOC(AdcbRegs, 2, VY_BYP_ADC_CH);        // B9   Vy_byp
     SET_SOC(AdcbRegs, 3, VREF1P5_ADC_CH);       // B0   Vref1.5
     SET_SOC(AdcbRegs, 4, TEMP3_ADC_CH);         // B1   Temp3
 
     //---------- ADC-C ----------------------------------------------------
-    SET_SOC(AdccRegs, 0, IY_IND_ADC_CH);        // C5   Idc2   (bridge 2)
-    SET_SOC(AdccRegs, 1, VDCLINK_ADC_CH);       // C0   Vdc
+    SET_SOC(AdccRegs, 0, IY_IND_ADC_CH);        // C5   Iy_ind
+    SET_SOC(AdccRegs, 1, VDCLINK_ADC_CH);       // C0   VdcLink
+    SET_SOC(AdccRegs, 2, VR_BYP_ADC_CH);        // C9   Vr_byp
     SET_SOC(AdccRegs, 3, VBAT_ADC_CH);          // C2   Vbat
     SET_SOC(AdccRegs, 4, TEMP2_ADC_CH);         // C8   Temp2
 
     //---------- ADC-D ----------------------------------------------------
-    SET_SOC(AdcdRegs, 0, VR_INV_ADC_CH);        // D14  Vinp_R
+    SET_SOC(AdcdRegs, 0, VR_INV_ADC_CH);        // D14  Vr_inv
+    SET_SOC(AdcdRegs, 1, VB_OUT_ADC_CH);        // D15  Vb_out
+    SET_SOC(AdcdRegs, 2, VY_OUT_ADC_CH);        // D12  Vy_out
     SET_SOC(AdcdRegs, 3, IBAT_ADC_CH);          // D11  Ibat
 
     //---------- ADC-E ----------------------------------------------------
-    SET_SOC(AdceRegs, 1, VY_INV_ADC_CH);        // E12  Vinp_Y
+    SET_SOC(AdceRegs, 0, IB_IND_ADC_CH);        // E11  Ib_ind
+    SET_SOC(AdceRegs, 1, VY_INV_ADC_CH);        // E12  Vy_inv
+    SET_SOC(AdceRegs, 2, VR_OUT_ADC_CH);        // E16  Vr_out
 
     //---------- End of conversion interrupt --------------------------------
     AdcaRegs.ADCINTSEL1N2.bit.INT1SEL = 4;      // EOC4 on ADC-A

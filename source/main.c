@@ -71,7 +71,7 @@ char tchr[16];
 #define DI_EPO              0x0080
 
 
- void main(void) {
+ void main(void){
 
 	//Device_init();
 
