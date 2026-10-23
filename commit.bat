@@ -2,12 +2,12 @@
 setlocal
 REM ============================================================
 REM  commit.bat - save today's work to GitHub
-REM  Repo: https://github.com/vijayanca/INV3PH_VERTIV_v1
+REM  Repo: https://github.com/vijayanca/Pfc3ph_Vertiv_v1
 REM  Double-click this file, type a short note, press Enter.
 REM ============================================================
 
 cd /d "%~dp0"
-title Commit Inv3ph_Vertiv_v1 to GitHub
+title Commit Pfc3ph_Vertiv_v1 to GitHub
 
 where git >nul 2>nul
 if errorlevel 1 (
@@ -26,7 +26,7 @@ if not exist ".git" (
     git init -q -b main
     git config user.name "Vijayan"
     git config user.email "vijayanca@gmail.com"
-    git remote add origin https://github.com/vijayanca/INV3PH_VERTIV_v1.git
+    git remote add origin https://github.com/vijayanca/Pfc3ph_Vertiv_v1.git
     git fetch -q origin
     if errorlevel 1 (
         echo  Could not reach GitHub. Check the internet connection.
