@@ -22,101 +22,69 @@ Uint16 crc_rxd=0,crc_act=0;
 const PARAM *paramptr;
 
 const PARAM defaultValues[] = {
-                               {100,300,230},  /*  RatedVoltage 100 */
-                               {1,500,100},  /*  RatedCurrent 101 */
-                               {-0.3,0.0,-0.2},  /*  Cur_deMin 102 */
-                               {0.01,0.5,0.2},  /*  Cur_deMax 103 */
-                               {0.0,0.5,0.2},  /*  Cur_qeMax 104 */
-                               {-1.0f,1.0f,0.0f},  /*  NotUsedW003 105 */
-                               {100,300,280},  /*  InvVoltageHL 106 */
-                               {50,250,200},  /*  InvVoltageLL 107 */
-                               {100,280,280},  /*  BypVoltageHL 108 */
-                               {100,300,200},  /*  BypVoltageLL 109 */
-                               {45,60,47},  /*  BypFrequencyLL 110 */
-                               {45,65,52},  /*  BypFrequencyHL 111 */
-                               {0.01,120,0.5},  /*  InvVoltHL_delay 112 */
-                               {0.01,30.0,2.0},  /*  InvVoltLL_delay 113 */
-                               {0.01,10,0.5},  /*  BypVoltHL_delay 114 */
-                               {0.01,10,0.5},  /*  BypVoltLL_delay 115 */
-                               {0.01,10,0.5},  /*  BypFreq_delay 116 */
-                               {80,200,105},  /*  InvCurHL_Lvl1 117 */
-                               {80,200,150},  /*  InvCurHL_Lvl2 118 */
-                               {80,300,200},  /*  InvCurHL_Lvl3 119 */
-                               {0.1,7200,1800},  /*  InCurHL_delay_Lvl1 120 */
-                               {0.1,600,30},  /*  InCurHL_delay_Lvl2 121 */
-                               {0.1,300,1},  /*  InCurHL_delay_Lvl3 122 */
-                               {100,800,720},  /*  DCLinkHighLmit 123 */
-                               {20,800,500},  /*  DCLinkLowLmit 124 */
-                               {0.1,300,1},  /*  DCLinkLowLmit_delay 125 */
-                               {0.1,300,1},  /*  DCLinkHighLmit_delay 126 */
-                               {100,500,450},  /*  VbatHighLmit 127 */
-                               {50,450,240},  /*  VbatLowLmit 128 */
-                               {0.1,300,1},  /*  VbatLowLmit_delay 129 */
-                               {0.1,300,1},  /*  VbatHighLmit_delay 130 */
-                               {1,500,300},  /*  IbatHighLmit 131 */
-                               {0.1,300,1},  /*  IbatHighLmit_delay 132 */
-                               {0.1,20,5},  /*  vdc_hysteresis 133 */
-                               {50,450,240},  /*  VbatLowLmit 134 */
+                               {50,900,720},  /*  DcLinkReference 100 */
+                               {1,10,3},  /*  PowerLimit 101 */
+                               {350,500,480},  /*  GridVoltageHL 102 */
+                               {50,440,300},  /*  GridVoltageLL 103 */
+                               {100,900,800},  /*  DCLinkHL 104 */
+                               {10,800,350},  /*  DCLinkLL 105 */
+                               {1,500,100},  /*  IinpHL 106 */
+                               {2,1000,200},  /*  OC_Level 107 */
+                               {100,1000,850},  /*  DCOV_Inst_Level 108 */
+                               {0.01,120,0.5},  /*  GridVoltageHL_delay 109 */
+                               {0.01,120,0.5},  /*  GridVoltageLL_delay 110 */
+                               {0.01,120,0.5},  /*  DCLinkHL_delay 111 */
+                               {0.01,120,0.5},  /*  DCLinkLL_delay 112 */
+                               {0.01,120,0.5},  /*  IinpHL_delay 113 */
+                               {40,60,47},  /*  FrequencyLowLimit 114 */
 
-                               {0.5,2,1.4},  /*  TrxFactor 135 */
-                               {0.9,1.1,1},  /*  Yfactor 136 */
-                               {0.9,1.1,1},  /*  Bfactor 137 */
-                               {5,1000,100},  /*  RatedKVA 138 */
-                               {5,1000,100},  /*  RatedKW 139 */
-                               {1,120,32},  /*  BatteryBlocks 140 */
-                               {1,20,12},  /*  BlockVoltage 141 */
-                               {0.001,0.1,0.005},  /*  LockingLevel 142 */
-                               {6,40,12.8},  /*  Switching Freq 143 */
-                               {1,500,200},  /*  maxCurrentTransfer 144 */
-                               {0.01,.5,0.1},  /*  cur_neg_kp 145 */
-                               {0.001,0.5,0.01},  /*  cur_neg_ki 146 */
-                               {-0.5,1.047197551, 0.523598776},  /*  Angle30 147 */
-                               {0.0001,0.1,0.001}, /* cur_neg_lpf  148  */
+                               {45,65,53},  /*  FrequencyHighLimit 115 */
+                               {0.01,120,1},  /*  FrequencyLowDelay 116 */
+                               {0.01,120,1},  /*  FrequencyHighDelay 117 */
+                               {10,800,250},  /*  PreChargeLevel 118 */
+                               {1,20,5},  /*  vdc_hysteresis 119 */
+                               {10,5000,1200},  /*  VinpRSF 120 */
+                               {10,5000,1200},  /*  VinpYSF 121 */
+                               {10,5000,1200},  /*  VinpBSF 122 */
+                               {10,5000,1200},  /*  IinpRSF 123 */
+                               {10,5000,1200},  /*  IinpYSF 124 */
+                               {10,5000,1200},  /*  IinpBSF 125 */
+                               {10,5000,1200},  /*  DcLinkVoltageSF 126 */
+                               {10,5000,1200},  /*  VbatSF 127 */
+                               {10,5000,1200},  /*  IbatSF 128 */
+                               {10,5000,1200},  /*  Temp1SF 129 */
 
-                               {0,2,0}, /* VoltCtrlMode  149  0:PI 1:PR 2:open loop (test) */
-                               {0,15,3}, /* pr_hMask  150  */
-                               {48,62,50},  /*  SetFrequency 151 */
-                               { 100, 1100, 850},/* DCOV_Inst_Level 152 */
-                               { 0.01, 4.0, 2.0},/* current_kp 153 */
-                               { 0.001, 0.5, 0.01},/* current_ki 154 */
-                               {0.01,2,0.1},  /*  inv_kp 155 */
-                               {0.001,0.5,0.01},  /*  inv_ki 156 */
-                               {0.001,0.1,0.005},  /*  LockLevel 157 */
-                               {0.0,1.0,0.1},  /*  PhaseShift 158 */
-                               {100,300,250},  /*  VacPeakLimit 159 */
-                               {10,5000,1200},  /*  VinvRSF 160 */
-                               {10,5000,1200},  /*  VinvYSF 161 */
-                               {10,5000,1200},  /*  VinvBSF 162 */
-                               {10,5000,1200},  /*  IinvRSF 163 */
-                               {10,5000,1200},  /*  IinvYSF 164 */
-                               {10,5000,1200},  /*  IinvBSF 165 */
-                               {10,5000,1200},  /*  VoutRSF 166 */
-                               {10,5000,1200},  /*  VoutYSF 167 */
-                               {10,5000,1200},  /*  VoutBSF 168 */
-                               {10,5000,1200},  /*  IoutRSF 169 */
-                               {10,5000,1200},  /*  IoutYSF 170 */
-                               {10,5000,1200},  /*  IoutBSF 171 */
-                               {10,5000,1200},  /*  VbypRSF 172 */
-                               {10,5000,1200},  /*  VbypYSF 173 */
-                               {10,5000,1200},  /*  VbypBSF 174 */
-                               {10,5000,1200},  /*  DcLinkVoltageSF 175 */
-                               {10,5000,1200},  /*  VbatSF 176 */
-                               {10,5000,1200},  /*  IbatSF 177 */
-                               {10,5000,1200},  /*  Temp1SF 178 */
-                               {10,5000,1200},  /*  Temp2SF 179 */
+                               {10,5000,1200},  /*  Temp2SF 130 */
+                               {0.0,0.5,0.2},  /*  CrossXL 131 */
+                               {0.01,2,0.5},  /*  dclink_kp 132 */
+                               {0.001,0.5,0.01},  /*  dclink_ki 133 */
+                               {0.01,5,1},  /*  current_kp 134 */
+                               {0.001,0.1,0.01},  /*  current_ki 135 */
+                               {0.01,1,0.3},  /*  current_lpfT 136 */
+                               {0.1,1,0.65},  /*  InputLPF 137 */
+                               {0.1,0.5,0.4},  /*  pid_de_Umax 138 */
+                               {0.05,0.5,0.25},  /*  pfc_pid_qmax 139 */
+                               {-0.4,0,-0.02},  /*  pid_DCLink_Umin 140 */
+                               {0,0.05,0.001},  /*  QRef 141 */
+                               {6,24,10},  /*  FswPFC 142 (kHz) */
+                               {0.6,10,1.0},  /*  PR_Kp 143 */
+                               {10,4000,400},  /*  PR_Kr 144 */
 
-                               {0.00001,0.001,0.0001},  /*  omegaShift 180 */
-
-                               {-1.5,1.5,0},  /*  DtComp 181 (0 = off) */
-                               {0.5,50,2},  /*  DtBand 182 (A) */
-                               {-180,180,0},  /*  pr_ph5 183 (deg) */
-                               {-180,180,0},  /*  pr_ph7 184 (deg) */
-                               {-180,180,0},  /*  pr_ph11 185 (deg, 11th and 13th) */
-                               {0,0.05,0.004},  /*  pr_kh 186 */
-                               {0.5,50,5},  /*  pr_wc 187 */
-                               {0,5,1.5}, /* pr_delay  188  */
-                               {0.01,0.3,0.1}, /* pr_hLimit  189  */
-
+                               {0,4000,0},  /*  PR_Kh 145 (< 1 = off) */
+                               {-1.5,1.5,0},  /*  DtComp 146 (0 = off) */
+                               {0.5,50,2},  /*  DtBand 147 (A) */
+                               {1,1000,100},  /*  RatedKW 148 */
+                               {50,440,250},  /*  GridFailLevel 149 */
+                               {0,1,0},  /*  spare 150 */
+                               {0,1,0},  /*  spare 151 */
+                               {0,1,0},  /*  spare 152 */
+                               {0,1,0},  /*  spare 153 */
+                               {0,1,0},  /*  spare 154 */
+                               {0,1,0},  /*  spare 155 */
+                               {0,1,0},  /*  spare 156 */
+                               {0,1,0},  /*  spare 157 */
+                               {0,1,0},  /*  spare 158 */
+                               {0,1,0},  /*  spare 159 */
     };
 
 
@@ -310,12 +278,10 @@ void RestoreSettings(void)
 
     if (val == MAGIC)
     {
-        spiU = RestoreParams( 0);
-        spiU = RestoreParams(15);
-        spiU = RestoreParams(30);
-        spiU = RestoreParams(45);
-        spiU = RestoreParams(60);
-        spiU = RestoreParams(75);
+        spiU  = RestoreParams( 0);
+        spiU |= RestoreParams(15);
+        spiU |= RestoreParams(30);
+        spiU |= RestoreParams(45);
 
         if (spiU)
         {
@@ -338,8 +304,6 @@ void storeArrayToEEPROM(void) {
     StoreParams(15);
     StoreParams(30);
     StoreParams(45);
-	StoreParams(60);
-	StoreParams(75);
 }
 
 
@@ -377,22 +341,7 @@ N16 UpdateOne(N16 adr, float32_t val) {
 
             WritePending = TRUE; AutoSaveTimer = 10;
 
-            if ( (adr >= PID_START) && (adr <= PID_END)) updateRAMvalues(adr);
-            if ( (adr >= REF_START) && (adr <= REF_END)) updateRAMvalues(adr);
-            if ( (adr >= 117) && (adr <= 119)) updateRAMvalues(adr);
-
-            if ( (adr == 107) || (adr == 109))
-            {
-                inverterFailLevel = InvVoltageLL/VinvRSF*0.9;
-                bypassFailLevel = BypVoltageLL/VbypRSF*0.9;
-            }
-
-            if (adr == 152) dcOV_Inst_Level = DCOV_Inst_Level/DcLinkVoltageSF;
-
-            if (adr == 143) //sw Freq
-            {
-                if(pwmEnabled==0) UPDATE_INV_FSW();
-            }
+            updateRAMvalues(adr);       // gains, limits, references to the controllers
               return (0);
         }
     }

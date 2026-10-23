@@ -37,7 +37,7 @@
 #define MCAN_FIFO_1_ELEM_SIZE           (MCAN_ELEM_SIZE_64BYTES)
 #define MCAN_RX_BUFF_NUM                (0U)
 #define MCAN_RX_BUFF_ELEM_SIZE          (MCAN_ELEM_SIZE_64BYTES)
-#define MCAN_TX_BUFF_SIZE               (2U)    // 0 = paralleling, 1 = display
+#define MCAN_TX_BUFF_SIZE               (2U)    // 0 = spare (CAN-B), 1 = display
 #define MCAN_TX_FQ_SIZE                 (0U)
 #define MCAN_TX_BUFF_ELEM_SIZE          (MCAN_ELEM_SIZE_64BYTES)
 #define MCAN_TX_EVENT_SIZE              (0U)
@@ -60,7 +60,8 @@ static void InitMCANModule(uint32_t base, const MCAN_InitParams *initParams,
                            const MCAN_MsgRAMConfigParams *ramCfg,
                            const MCAN_StdMsgIDFilterElement *filt);
 
-// Paralleling with the other unit runs on CAN-B
+// CAN-B: initialised and received, no frames used by the PFC (the inverter's
+// paralleling bus)
 #define PAR_CAN_BASE    MCANB_DRIVER_BASE
 
 
@@ -72,41 +73,6 @@ int32_t     error = 0;
 int32_t loopCnt = 0U;
 N16 startAddr1 = 0;
 N16 pktNumber = 0;
-
-/*------------------------------------------------------------------------------
- Inverter paralleling on CAN-B (MCANB), classic CAN, 11-bit ID, DLC 8,
- two 32-bit words little-endian (bytes 0-3 = v1, bytes 4-7 = v2):
-   ID 2  master -> slave : v1 = Angle (float), v2 = omega_inv (float)
-   ID 3  master -> slave : v1 = AlarmFlag2 << 16 | UPSFlag, v2 = cur.lpf_de.y (float)
-   ID 15 slave -> master : v1 = AlarmFlag2 << 16 | UPSFlag, v2 = cur.lpf_de.y (float)
- Sent from AdcISR (SendCANPackets, interrupt.c) on TX buffer 0.
-------------------------------------------------------------------------------*/
-static MCAN_TxBufElement parMsg;
-
-// Queue one paralleling frame. Returns 0 (frame dropped) if the previous one is
-// still pending, so the ADC ISR never waits on the bus.
-N16 ParTransmit(N16 id, long v1, long v2)
-{
-    if(MCAN_getTxBufReqPend(PAR_CAN_BASE) & 1UL) return 0;
-
-    parMsg.data[0] = (v1 >> 0)  & 0xff;
-    parMsg.data[1] = (v1 >> 8)  & 0xff;
-    parMsg.data[2] = (v1 >> 16) & 0xff;
-    parMsg.data[3] = (v1 >> 24) & 0xff;
-    parMsg.data[4] = (v2 >> 0)  & 0xff;
-    parMsg.data[5] = (v2 >> 8)  & 0xff;
-    parMsg.data[6] = (v2 >> 16) & 0xff;
-    parMsg.data[7] = (v2 >> 24) & 0xff;
-
-    parMsg.id  = (uint32_t)id << 18;
-    parMsg.rtr = 0U; parMsg.xtd = 0U; parMsg.esi = 0U;
-    parMsg.dlc = 8U; parMsg.brs = 0U; parMsg.fdf = 0U;
-    parMsg.efc = 0U; parMsg.mm  = 0U;
-
-    MCAN_writeMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_BUF, 0U, &parMsg);
-    MCAN_txBufAddReq(PAR_CAN_BASE, 0U);
-    return 1;
-}
 
 // TRUE if either CAN module is bus-off (main loop then re-initialises)
 N16 MCANBusOff(void)
@@ -124,7 +90,6 @@ void    MCANBusProcessing(void)
 {
    if(poweronTimer < 1000) return;
 
-   // CAN-B paralleling frames are sent from AdcISR (SendCANPackets)
    DisplayBroadcast();
    DisplayWriteProcessing();
 }
@@ -133,7 +98,7 @@ void    MCANBusProcessing(void)
  Display unit on CAN-A
  Classic CAN, 11-bit ID, DLC 8, int16 words little-endian (low byte first).
 
- Broadcast (rectifier -> display), ID = DISP_BASE_ID + (unit - 1) * DISP_UNIT_STEP + n
+ Broadcast (PFC -> display), ID = DISP_BASE_ID + (unit - 1) * DISP_UNIT_STEP + n
    unit 1: 0x200..0x2DB, unit 2: 0x300..0x3DB
    n = 0x00..0x77 : floats, bytes 0-3 = ArrayParamsF[2n], bytes 4-7 = ArrayParamsF[2n+1]
                     (float32), ArrayParamsF[0..239]
@@ -142,7 +107,7 @@ void    MCANBusProcessing(void)
    One frame every DISP_FRAME_MS on TX buffer 1 -> 220 frames, all values
    every 440 ms.
 
- Write (display -> rectifier), same format as the inverter/PFC display protocol
+ Write (display -> PFC), same format as the inverter/PFC display protocol
    float: ID = DISP_SET_F_ID + 2*(unit-1)  (unit 1: 0x100, unit 2: 0x102)
           bytes 0-1 = ArrayParamsF index, bytes 4-7 = float32 -> UpdateOne(idx)
    int  : ID = DISP_SET_I_ID + 2*(unit-1)  (unit 1: 0x101, unit 2: 0x103)
@@ -171,9 +136,10 @@ static volatile N16 dispWrPending = 0;
 static N16 dispWrId = 0;
 static N16 dispWrData[8];
 
+// The PFC is always unit 2 of the inverter / PFC display protocol
 N16 DisplayUnit(void)
 {
-    return (address == 2) ? 2 : 1;
+    return DISP_UNIT_PFC;
 }
 
 // Float-write ID for this unit; the int-write ID is this + 1
@@ -285,24 +251,14 @@ void DisplayWriteProcessing(void)
 
     dispWrPending = 0;
 }
-// little-endian 32-bit word from rx.data[n..n+3]
-static long parWord(const MCAN_RxBufElement *m, N16 n)
-{
-    long lo = ((long)(m->data[n + 1] & 0xff) << 8) | (m->data[n] & 0xff);
-    long hi = ((long)(m->data[n + 3] & 0xff) << 8) | (m->data[n + 2] & 0xff);
-    return lo | (hi << 16);
-}
-
+// CAN-B RX, interrupt line 1 (PIE 9.10 MCANB_1): frames are acknowledged and
+// counted only, the PFC uses no CAN-B messages
 __interrupt void MCANIntr1ISR(void)
 {
     uint32_t intrStatus;
     MCAN_RxBufElement rx;
     MCAN_RxFIFOStatus fs;
-    long w;
-    float v1;
-    N16 id;
 
-    // Paralleling RX: CAN-B, interrupt line 1 (PIE 9.10 MCANB_1)
     intrStatus = MCAN_getIntrStatus(PAR_CAN_BASE);
     HW_WR_FIELD32(PAR_CAN_BASE + MCAN_MCANSS_EOI, MCAN_MCANSS_EOI, 0x2U);
     MCAN_clearIntrStatus(PAR_CAN_BASE, intrStatus);
@@ -313,41 +269,6 @@ __interrupt void MCANIntr1ISR(void)
         MCAN_getRxFIFOStatus(PAR_CAN_BASE, &fs);
         MCAN_readMsgRam(PAR_CAN_BASE, MCAN_MEM_TYPE_FIFO, 0U, MCAN_RX_FIFO_NUM_1, &rx);
         MCAN_writeRxFIFOAck(PAR_CAN_BASE, MCAN_RX_FIFO_NUM_1, fs.getIdx);
-
-        id = (N16)(rx.id >> 18);
-        CANOKtimer = 10;
-
-        if((id == 0x0002) && !SystemFlag.bit.POWERINGUP)    // from master: angle, omega
-        {
-            MasterPresentTimer = 1000;
-
-            w = parWord(&rx, 0);
-            v1 = *(float *) &w;
-            if((v1 >= 0) && (v1 < 6.8)) remoteAngle = v1;
-
-            w = parWord(&rx, 4);
-            v1 = *(float *) &w;
-            if((v1 >= PLL_LOCK_MIN) && (v1 < PLL_LOCK_MAX)) remoteOmega = v1;
-        }
-
-        if((id == 0x0003) && (Master == 0))                 // from master: status, Id current
-        {
-            w = parWord(&rx, 0);
-            masterAlarmFlag1 = (N16)(w & 0xffff);
-            masterAlarmFlag2 = (N16)((w >> 16) & 0xffff);
-            PairStatusFlag.all = masterAlarmFlag1;
-
-            w = parWord(&rx, 4);
-            remoteIref = *(float *) &w;
-        }
-
-        if((id == 0x000f) && Master)                        // from slave: status
-        {
-            w = parWord(&rx, 0);
-            masterAlarmFlag1 = (N16)(w & 0xffff);
-            masterAlarmFlag2 = (N16)((w >> 16) & 0xffff);
-            PairStatusFlag.all = masterAlarmFlag1;
-        }
 
         tmp_canRxCounter++;
     }
@@ -438,7 +359,7 @@ void    InitMCAN(void)
     bitTimes.dataSynchJumpWidth = 3U;
     //
     // Same set-up on both modules (RX interrupts on line 1, enabled in main.c)
-    // CAN-B = paralleling: accept IDs 0x000..0x3FF
+    // CAN-B (not used by the PFC): accept IDs 0x000..0x3FF
     InitMCANModule(MCANB_DRIVER_BASE, &initParams, &bitTimes, &msgRAMConfigParams, &stdFiltelem);
 
     // CAN-A = display: accept only this unit's two write IDs (float, int)

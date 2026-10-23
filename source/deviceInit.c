@@ -8,7 +8,7 @@ History Log	  :
 -----------------------------------------------------------------------------------
 Date	| Modified |  		Description of Modification 		| Bug Number |
 		|   By	   |											|			 |
-		|		   |											|			 |
+23/10/26| VCA      | 3-phase PFC (RBC control)                  |			 |
 ************************************************************************************/
 
 #define	CCEXTERN	extern
@@ -21,104 +21,23 @@ Date	| Modified |  		Description of Modification 		| Bug Number |
 #include "../include/device.h"
 #include "SVGEN_CLA.h"
 
-#define	CARD_ID			1004
+#define	CARD_ID			2001        // RBC / PFC family (RBC2_KDSENG_v4)
 #define	SWVERSION_SET	100
-
-extern pllBlock  pllGrid;
-extern SVGEN_CLA svgen_dq1;
-void SetPIReg(PIreg *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin, float32_t ui);
-
-
-void PID_GRANDO_F_init(PID_GRANDO_F_CONTROLLER *v)
-{
-    v->term.Ref=0;
-    v->term.Fbk=0;
-    v->term.Out=0;
-    v->term.c1=0.1;
-    v->term.c2=0.1;
-
-    v->param.Kr = (1.0);
-    v->param.Kp = (0.5);
-    v->param.Ki = (0.1);
-    v->param.Kd = (0.0);
-    v->param.Km = (1.0);
-    v->param.Umax = (1.0);
-    v->param.Umin = (-1.0);
-
-    v->data.up = (0.0);
-    v->data.ui = (0.0);
-    v->data.ud = (0.0);
-    v->data.v1 = (0.0);
-    v->data.i1 = (0.0);
-    v->data.d1 = (0.0);
-    v->data.d2 = (0.0);
-    v->data.w1 = (1.0);
-}
-
-void InitPID(PID_GRANDO_F_CONTROLLER *v)
-{
-    v->term.Ref=0;
-    v->term.Fbk=0;
-    v->term.Out=0;
-    v->term.c1=0.1;
-    v->term.c2=0.1;
-
-    v->data.up = (0.0);
-    v->data.ui = (0.0);
-    v->data.ud = (0.0);
-    v->data.v1 = (0.0);
-    v->data.i1 = (0.0);
-    v->data.d1 = (0.0);
-    v->data.d2 = (0.0);
-    v->data.w1 = (1.0);
-}
 
 void    InitHiLoParams(void)
  {
-     InitHiLo(&chkFrequency, &GridFrequency, &BypFrequencyHL, &BypFrequencyLL, &BypFreq_delay, &BypFreq_delay );
-     InitHiLo(&chkVr, &VinvR, &InvVoltageHL, &InvVoltageLL, &InvVoltHL_delay, &InvVoltLL_delay);
-     InitHiLo(&chkVy, &VinvY, &InvVoltageHL, &InvVoltageLL, &InvVoltHL_delay, &InvVoltLL_delay);
-     InitHiLo(&chkVb, &VinvB, &InvVoltageHL, &InvVoltageLL, &InvVoltHL_delay, &InvVoltLL_delay);
+     InitHiLo(&chkFrequency, &GridFrequency, &FrequencyHighLimit, &FrequencyLowLimit, &FrequencyHighDelay, &FrequencyLowDelay);
 
-     InitHiLo(&chkIr1, &IoutR, &InvCurHL_Lvl1a, &LowValue, &InCurHL_delay_Lvl1, &LowDelay);
-     InitHiLo(&chkIy1, &IoutY, &InvCurHL_Lvl1a, &LowValue, &InCurHL_delay_Lvl1, &LowDelay);
-     InitHiLo(&chkIb1, &IoutB, &InvCurHL_Lvl1a, &LowValue, &InCurHL_delay_Lvl1, &LowDelay);
+     // grid limits are line-line
+     InitHiLo(&chkVr, &VinpRY, &GridVoltageHL, &GridVoltageLL, &GridVoltageHL_delay, &GridVoltageLL_delay);
+     InitHiLo(&chkVy, &VinpYB, &GridVoltageHL, &GridVoltageLL, &GridVoltageHL_delay, &GridVoltageLL_delay);
+     InitHiLo(&chkVb, &VinpBR, &GridVoltageHL, &GridVoltageLL, &GridVoltageHL_delay, &GridVoltageLL_delay);
 
-     InitHiLo(&chkIr2, &IoutR, &InvCurHL_Lvl2a, &LowValue, &InCurHL_delay_Lvl2, &LowDelay);
-     InitHiLo(&chkIy2, &IoutY, &InvCurHL_Lvl2a, &LowValue, &InCurHL_delay_Lvl2, &LowDelay);
-     InitHiLo(&chkIb2, &IoutB, &InvCurHL_Lvl2a, &LowValue, &InCurHL_delay_Lvl2, &LowDelay);
-
-     InitHiLo(&chkIr3, &IoutR, &InvCurHL_Lvl3a, &LowValue, &InCurHL_delay_Lvl3, &LowDelay);
-     InitHiLo(&chkIy3, &IoutY, &InvCurHL_Lvl3a, &LowValue, &InCurHL_delay_Lvl3, &LowDelay);
-     InitHiLo(&chkIb3, &IoutB, &InvCurHL_Lvl3a, &LowValue, &InCurHL_delay_Lvl3, &LowDelay);
-
-     InitHiLo(&chkVbypr, &VbypR, &BypVoltageHL, &BypVoltageLL, &BypVoltHL_delay, &BypVoltLL_delay);
-     InitHiLo(&chkVbypy, &VbypY, &BypVoltageHL, &BypVoltageLL, &BypVoltHL_delay, &BypVoltLL_delay);
-     InitHiLo(&chkVbypb, &VbypB, &BypVoltageHL, &BypVoltageLL, &BypVoltHL_delay, &BypVoltLL_delay);
-
-
-     InitHiLo(&chkVbat, &Vbat, &VbatHL, &VbatLL, &VbatHL_delay, &VbatLL_delay);
-     InitHiLo(&chkVbatpre, &Vbat, &VbatHL, &Vbat_PreAlarm, &VbatHL_delay, &VbatLL_delay); //Vbat_PreAlarm
+     InitHiLo(&chkIr, &IinpR, &IinpHL, &LowValue, &IinpHL_delay, &LowDelay);
+     InitHiLo(&chkIy, &IinpY, &IinpHL, &LowValue, &IinpHL_delay, &LowDelay);
+     InitHiLo(&chkIb, &IinpB, &IinpHL, &LowValue, &IinpHL_delay, &LowDelay);
 
      InitHiLo(&chkdcLink, &DcLinkVoltage, &DCLinkHL, &DCLinkLL, &DCLinkHL_delay, &DCLinkLL_delay);
-     InitHiLo(&chkIbat, &Ibat, &IbatHL, &LowValue, &IbatHL_delay, &LowDelay);
-
- }
-
- void    CheckHiLoH(MIN_MAX *x)
- {
-     if(*x->val>*x->Max) { if(x->maxTimer< (N32) (*x->maxDelay*1000)) x->maxTimer++; }
-     else if(*x->val < (*x->Max - vdc_hysteresis)) { if(x->maxTimer) x->maxTimer--; }
-     if(*x->val<*x->Min) { if(x->minTimer< (N32)(*x->minDelay*1000)) x->minTimer++; }
-     else if (*x->val> (*x->Min + vdc_hysteresis)) { if(x->minTimer) x->minTimer--; }
-
-     if(x->maxTimer== (N32)(*x->maxDelay*1000)) x->stat.bit.HIGH = TRUE;
-     if(x->stat.bit.ARH && (x->maxTimer==0)) x->stat.bit.HIGH = FALSE;
-
-     if(x->minTimer== (N32)(*x->minDelay*1000)) x->stat.bit.LOW = TRUE;
-     if(x->stat.bit.ARL && (x->minTimer==0)) x->stat.bit.LOW = FALSE;
-     if(x->stat.bit.LOW  || x->stat.bit.HIGH /*|| *x->val<*x->Min*/) x->stat.bit.OK = FALSE;
-     else x->stat.bit.OK = TRUE;
  }
 
 
@@ -138,15 +57,6 @@ void    InitHiLoParams(void)
      else x->stat.bit.OK = TRUE;
  }
 
- void    CheckHi(MIN_MAX *x)
- {
-     if(*x->val>*x->Max) { if(x->maxTimer<*x->maxDelay) x->maxTimer++; }
-     else { if(x->maxTimer) x->maxTimer--; }
-
-     if(x->maxTimer==*x->maxDelay) x->stat.bit.HIGH = TRUE;
-     if(x->stat.bit.ARH && (x->maxTimer==0)) x->stat.bit.HIGH = FALSE;
- }
-
  void  InitHiLo(MIN_MAX *x, float32_t *v1, float32_t *hlmt, float32_t *llmt, float32_t *hdly, float32_t *ldly)
  {
      x->val = v1;
@@ -164,7 +74,6 @@ void    InitHiLoParams(void)
  void InitVariables(void) {
 
  N16 i = 0;
-     PowerOnDelay = 5000;
      for(i=0;i<NPARAMS;i++)
          ArrayParamsF[i]= 0;
 
@@ -177,106 +86,55 @@ void    InitHiLoParams(void)
      for(i=0;i<20;i++)
          offsets[i]= 0;
 
-     MasterPresentTimer = POWERONDELAY;
      PowerOnDelay = POWERONDELAY;
 
-     omega_inv = OMEGADEFAULT;
-     remoteOmega  = OMEGADEFAULT;
-
-     DIpins[0] = 20;
-     DIpins[1] = 55;
-     DIpins[2] = 54;
-     DIpins[3] = 53;
-     DIpins[4] = 52;
-     DIpins[5] = 51;
-     DIpins[6] = 50;
-     DIpins[7] = 49;
-
-
-     InitStructs();
-     ref_inc = (0.0002);
+     ref_inc = (0.0002);        // DC-link soft start, p.u. per ms (RBC)
      SystemFlag.all = 0;
 
-     PID_GRANDO_F_init(&vcontrol.vol.pid_de);
-     PID_GRANDO_F_init(&vcontrol.vol.pid_qe);
-
-
-     SetPIReg(&cur.pi_de, 2.0, 0.01, 0.2, -0.1,0.0);
-     SetPIReg(&cur.pi_qe, 2.0, 0.01, 0.1, -0.1,0.0);
-     setLowPassFilter(&cur.lpf_qe, 0.2, 0.0);
-     setLowPassFilter(&cur.lpf_de, 0.2, 0.0);
-
-     SetPIReg(&cur_neg.pi_de, 0.1, 0.01, 0.1, -0.1,0.0);
-     SetPIReg(&cur_neg.pi_qe, 0.1, 0.01, 0.1, -0.1,0.0);
-     setLowPassFilter(&cur_neg.lpf_qe, 0.001, 0.0);
-     setLowPassFilter(&cur_neg.lpf_de, 0.001, 0.0);
-
-     setPIDRegulator(&vcontrol.vol.pid_de, 0.1, 0.01, 0.0,  1.0, 1.0, 0.96,-0.10);
-     setPIDRegulator(&vcontrol.vol.pid_qe, 0.1, 0.01, 0.0,  1.0, 1.0, 0.25,-0.25);
+     // RBC defaults; gains and limits are overwritten from the parameters
+     // (updateRAMvalues(0)) once they are restored from the EEPROM
+     SetPfcPI(&pid_dclink, 0.5, 0.01, 0.4, -0.02);
+     SetPfcPI(&pfc.pid_de, 2.0, 0.01, 0.4, -0.4);
+     SetPfcPI(&pfc.pid_qe, 2.0, 0.01, 0.4, -0.2);
+     setLowPassFilter(&pfc.lpf_qe, 0.2, 0.0);
+     setLowPassFilter(&pfc.lpf_de, 0.2, 0.0);
      PR_Reset();
-     PR_UpdateCoeffs();
 
-     setLowPassFilter(&vcontrol.vol.lpf_qe, 0.5, 0.0);
-     setLowPassFilter(&vcontrol.vol.lpf_de, 0.5, 0.0);
+     setLowPassFilter(&lpf_vR, (16000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_vY, (16000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_vB, (16000.0*SAMPLING_TIME), (0.0));
 
-     setHarmonicOscillator(&vcontrol.theta);
+     setLowPassFilter(&lpf_iR, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_iY, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_iB, (10000.0*SAMPLING_TIME), (0.0));
 
-     setLowPassFilter(&lpf_vInvR, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_vInvY, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_vInvB, (10000.0*SAMPLING_TIME), (0.0));
-
-     setLowPassFilter(&lpf_curRef, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_iInvR, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_iInvY, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_iInvB, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_ioutR, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_ioutY, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_ioutB, (10000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_voutR, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_voutY, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_voutB, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_vbypR, (5000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_vbypY, (5000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_vbypB, (5000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_dclink, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_vbat, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_ibat, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_temp1, (1000.0*SAMPLING_TIME), (0.0));
-     setLowPassFilter(&lpf_temp2, (1000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_dclink, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_vbat, (2000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_ibat, (2000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_temp1, (100.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_temp2, (100.0*SAMPLING_TIME), (0.0));
      setLowPassFilter(&lpf_bias, (50.0*SAMPLING_TIME), (0.0)); //Bias Voltage
+     setLowPassFilter(&lpf_omega, (100.0*SAMPLING_TIME), (OMEGADEFAULT)); //Omega
 
      initRmsMeter(&volt_meter_R);
      initRmsMeter(&volt_meter_Y);
      initRmsMeter(&volt_meter_B);
+     initRmsMeter(&volt_meter_RY);
+     initRmsMeter(&volt_meter_YB);
+     initRmsMeter(&volt_meter_BR);
 
      initRmsMeter(&cur_meter_R);
      initRmsMeter(&cur_meter_Y);
-     initRmsMeter(& cur_meter_B);
+     initRmsMeter(&cur_meter_B);
 
      initRmsMeter(&kw_meter_R);
      initRmsMeter(&kw_meter_Y);
      initRmsMeter(&kw_meter_B);
 
-
-     initRmsMeter(&iout_meter_R);
-     initRmsMeter(&iout_meter_Y);
-     initRmsMeter(&iout_meter_B);
-     initRmsMeter(&vout_meter_R);
-     initRmsMeter(&vout_meter_Y);
-     initRmsMeter(&vout_meter_B);
-     initRmsMeter(&vbyp_meter_R);
-     initRmsMeter(&vbyp_meter_Y);
-     initRmsMeter(&vbyp_meter_B);
-     initRmsMeter(&vll_meter_R);
-     initRmsMeter(&vll_meter_Y);
-     initRmsMeter(&vll_meter_B);
-     initRmsMeter(&vllb_meter_R);
-     initRmsMeter(&vllb_meter_Y);
-     initRmsMeter(&vllb_meter_B);
-
-     InitPLL(&pllBypass);
+     theta.sin_val = 0.0;
+     theta.cos_val = 1.0;
+     InitPLL(&pllGrid);
      SVGEN_CLA_INIT_MACRO(svgen_dq1);
-     defaultOmega = OMEGADEFAULT;
      CardID = CARD_ID;
      swVersion = SWVERSION_SET;
      getCompiledDate();
@@ -349,14 +207,6 @@ void	getCompiledDate(void)
 }
 
 
-	void InitStructs(void)
-	{
-
-
-
-	    return;
-	}
-
 //---------------------------------------------------------------------------
 // setLowPassFilter:
 //---------------------------------------------------------------------------
@@ -386,42 +236,8 @@ void setPiRegulator_old(PIreg* p, float32_t kp, float32_t ki, float32_t ui, floa
 
 }
 
-void setPIDRegulator(PID_GRANDO_F_CONTROLLER *p, float32_t kp, float32_t ki, float32_t kd,  float32_t kr, float32_t km, float32_t umax, float32_t umin)
-
-{
-    p->param.Kp = kp;
-    p->param.Ki = ki;
-    p->param.Kd = kd;
-    p->param.Kr = kr;
-    p->param.Km = km;
-    p->param.Umax = umax;
-    p->param.Umin = umin;
-
-    p->data.d1 = 0;p->data.d2 = 0;p->data.i1 = 0;p->data.ud = 0;p->data.ui = 0;p->data.up = 0;p->data.v1 = 0;p->data.w1 = 0;
-    p->term.Fbk = 0;p->term.Ref = 0;p->term.Out = 0;p->term.c1 = 0;p->term.c2 = 0;
-
-}
-
-void setPIRegulator(PI_CONTROLLER *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin)
-
-{
-    p->Kp = kp;
-    p->Ki = ki;
-    p->Umax = umax;
-    p->Umin = umin;
-
-    p->Ref = 0.0;
-    p->Fbk = 0.0;
-    p->Out = 0.0;
-    p->up = 0.0;
-    p->ui = 0.0;
-    p->v1 = 0.0;
-    p->i1 = 0.0;
-    p->w1 = 1.0;
-}
-
-void SetPIReg(PIreg *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin, float32_t ui)
-
+// PFC PI regulator (controlTypes.h PFC_PI_MACRO): gains, limits, state cleared
+void SetPfcPI(PFC_PI *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin)
 {
     p->Kp = kp;
     p->Ki = ki;
@@ -429,21 +245,10 @@ void SetPIReg(PIreg *p, float32_t kp, float32_t ki, float32_t umax, float32_t um
     p->Umin = umin;
     p->Ref = 0.0;
     p->Fbk = 0.0;
+    p->Err = 0.0;
     p->Out = 0.0;
     p->ui = 0.0;
 }
-//---------------------------------------------------------------------------
-// setHarmonicOscillator:
-//---------------------------------------------------------------------------
-//	This function sets the initial values of Harmonic Oscillator
-
-void setHarmonicOscillator(sincos* t) {
-
-	t->sin_val = 0.0;
-	t->cos_val = 1.0;
-
-}
-
 
 
 void initRmsMeter(rms_meter *r)

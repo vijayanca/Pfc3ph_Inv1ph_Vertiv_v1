@@ -16,7 +16,7 @@
 #define rbuf    spiReadBuffer
 #define wbuf    spiWriteBuffer
 //                     12345678901234567890
-char *defaultSerial = "HIRECT/0001/1612018";
+char *defaultSerial = "VERTIV/PFC3PH/0001";
 
 Uint16 crc_rxd1=0,crc_act1=0;
 
@@ -25,37 +25,53 @@ const PARAM_INT defaultValuesInt[] = {
 
                                      {0,1,0},  /*  UnitOnCommand 100 */
                                      {0,1,0},  /*  AcceptReset 101 */
-                                     {0,255,0},  /*  AlarmBits 102 */
-                                     {0,255,0},  /*  AlarmBits 103 */
-                                     {0,1,0},  /*  TestMode 104 */
-                                     {0,1,0},  /*  Master 105 */
-                                     {1,10,3},  /*  MaxRestartCount 106 */
-                                     {10,600,60},  /*  MainsOKDelay 107 */
+                                     {0,1,0},  /*  TestMode 102 */
+                                     {1,10,3},  /*  MaxRestartCount 103 */
+                                     {1,10,2},  /*  PreCharge_delay 104 (s) */
+                                     {1,1000,100},  /*  DCOV_Inst_Delay 105 (samples) */
+                                     {1,1000,100},  /*  OC_Delay 106 (samples) */
+                                     {0,1023,0},  /*  TripBits 107 (64 = DI7 heatsink) */
                                      {0,1,0},  /*  CaptureNow 108 */
-                                     {0,1000,0},  /*  BiasOffsetN 109 */
-                                     {0,1000,0},  /*  BiasOffset 110 */
-                                     {0,255,1},  /*  Tripbits 111 */
+                                     {5,120,10},  /*  RestartDelay 109 */
+                                     {1,300,60},  /*  FaultResetDelay 110 */
+                                     {0,1,1},  /*  RevPolarity 111 */
+                                     {0,1,1},  /*  PFSign 112 */
+                                     {0,1,1},  /*  PfcCtrlMode 113 (0 PI, 1 PR) */
+                                     {1,32,1},  /*  UnitAddress 114 */
 
-                                      {0,1,0},  /*  EcoMode 112 */
-                                      {0,4095,1500},  /*  IbatOffset 113 (12-bit ADC count) */
-                                      {1,32,1},  /*  UnitAddress 114 */
-                                      {0,1,0},  /*  NoFilter 115 */
-                                      {1,300,60},  /*  FaultResetDelay 116 */
-                                      {0,1,0},  /*  autoBypassFlag 117 */
-                                      {5,120,10},  /*  RestartDelay 118 */
-                                      {0,1,0},  /*  BypassAbscent 119 */
-                                      {1,60,10},  /*  notUsedInt_00 120 */
-                                      {1,10,10},  /*  notUsedInt_00 121 */
-
-                                      {0,1023,0},  /*  DI_No_Flag 122 */
+                                      {0,1,1},  /*  MainConAuxUsed 115 */
+                                      {0,1,0},  /*  AutoLevel 116 */
+                                      {1,200,8},  /*  nCycles 117 */
+                                      {0,4095,1500},  /*  IbatOffset 118 (12-bit ADC count) */
+                                      {0,1,0},  /*  spare 119 */
+                                      {0,1,0},  /*  spare 120 */
+                                      {0,1,0},  /*  spare 121 */
+                                      {0,1023,0},  /*  DI_NO_Flag 122 */
                                       {0,1,0},  /*  UpdateEEPROM 123 */
-                                      {0,1,0},  /*  BeepDuration 124 */
-                                      {1,200,8},  /*  nCycles 105 */
-                                      {0,1,0},  /*  PFSign 126 */
-                                      {0,1,1},  /*  RevPolarity 127 */
-                                      {10,2000,500}, /* DCOV_Inst_Delay 128 */
-                                      {0,1,0},  /*   UnbalanceCorrection 129 */
+                                      {0,1,0},  /*  spare 124 */
+                                      {0,1,0},  /*  spare 125 */
+                                      {0,1,0},  /*  spare 126 */
+                                      {0,1,0},  /*  spare 127 */
+                                      {0,1,0},  /*  spare 128 */
+                                      {0,1,0},  /*  spare 129 */
 
+                                      {0,1000,0},  /*   130 */
+                                      {0,1000,0},  /*   131 */
+                                      {0,1000,0},  /*   132 */
+                                      {0,1000,0},  /*   133 */
+                                      {0,1000,0},  /*   134 */
+                                      {0,1000,0},  /*   135 */
+                                      {0,1000,0},  /*   136 */
+                                      {0,1000,0},  /*   137 */
+                                      {0,1000,0},  /*   138 */
+                                      {0,1000,0},  /*   139 */
+                                      {0,1000,0},  /*   140 */
+                                      {0,1000,0},  /*   141 */
+                                      {0,1000,0},  /*   142 */
+                                      {0,1000,0},  /*   143 */
+                                      {0,1000,0},  /*   144 */
+                                      {0,1000,0},  /*   145 */
+                                      {0,1000,0},  /*   146 */
                                       {0,1000,0},  /*   147 */
                                       {0,1000,0},  /*   148 */
                                       {0,1000,0},  /*   149 */
@@ -69,10 +85,6 @@ const PARAM_INT defaultValuesInt[] = {
                                       {0,1000,0},  /*   157 */
                                       {0,1000,0},  /*   158 */
                                       {0,1000,0},  /*   159 */
-                                       {0,1,0},  /*   160 */
-                                       {0,1,0},  /*   161 */
-                                       {0,1,0},  /*   162 */
-                                       {0,1,0},  /*   163 */
 
             };
 

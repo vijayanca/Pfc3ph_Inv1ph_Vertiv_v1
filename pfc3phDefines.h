@@ -1,5 +1,5 @@
-#ifndef __INV3PHDEFINES_H__
-#define __INV3PHDEFINES_H__
+#ifndef __PFC3PHDEFINES_H__
+#define __PFC3PHDEFINES_H__
 
 //Type casts
 
@@ -14,12 +14,7 @@ typedef signed int S16;
 typedef signed char S8;
 
 
-#define ANGLE120 4.1887902048
-#define ANGLE240 2.0943951024
-//#define ANGLE30  0.523598776
-
 #define PHASE3PH
-//#define DUMMYSIG
 //#define SLOW_SAMPLING
 #define    CAN_GLB_INT_CANINT0  0x1
 #define    CAN_GLB_INT_CANINT1  0x2
@@ -32,7 +27,7 @@ typedef signed char S8;
 #define    BYROOT3				0.577350269
 #define    BYROOT3N			-0.577350269
 #define	   ONE3				0.3333333333
-#define    INV_SAMPLING_TIME	20000					//20.0KHz
+#define    PFC_SAMPLING_FREQ	20000					//20.0KHz
 #define    SYSTEM_FREQUENCY    150                     // TMS320F28P550, 150 MHz
 #define		POWERONDELAY		5000
 #define		CANOKDELAY			5
@@ -48,35 +43,51 @@ typedef signed char S8;
 // Common Controller v2: no RTC (MCP79522) on the board
 #define     RTC_PRESENT     0
 
+// Display unit on CAN-A: the PFC is unit 2 of the inverter / PFC display
+// protocol (broadcast 0x300.., writes 0x102 / 0x103), mcanInterface.c
+#define     DISP_UNIT_PFC   2
+
 // Digital inputs DI01..DI10 (PC817), board_pin_map.h DIx_GPIO.
 // DI1 is AIO GPIO247 (analog mode off in GpioInit). Read through GPIO_ReadPin()
 // so the port register (GPA/GPB/GPH) does not have to be named per pin.
 #define DINP1       GPIO_ReadPin(247U)      // DI_1  pin 42  Unit ON
 #define DINP2       GPIO_ReadPin(20U)       // DI_2  pin 48  Reset
-#define DINP3       GPIO_ReadPin(21U)       // DI_3  pin 49  Mains fail
-#define DINP4       GPIO_ReadPin(63U)       // DI_4  pin 47  Manual bypass
-#define DINP5       GPIO_ReadPin(48U)       // DI_5  pin 7   Output MCB
-#define DINP6       GPIO_ReadPin(49U)       // DI_6  pin 8   Bypass MCB
+#define DINP3       GPIO_ReadPin(21U)       // DI_3  pin 49  Main contactor aux
+#define DINP4       GPIO_ReadPin(63U)       // DI_4  pin 47  spare
+#define DINP5       GPIO_ReadPin(48U)       // DI_5  pin 7   spare
+#define DINP6       GPIO_ReadPin(49U)       // DI_6  pin 8   spare
 #define DINP7       GPIO_ReadPin(50U)       // DI_7  pin 9   Heatsink temp
 #define DINP8       GPIO_ReadPin(51U)       // DI_8  pin 10  EPO
 #define DINP9       GPIO_ReadPin(52U)       // DI_9  pin 11  spare
 #define DINP10      GPIO_ReadPin(53U)       // DI_10 pin 12  spare
 
-// Inverter carrier, up-down count at TBCLK = SYSCLK = 150 MHz:
+// DigitalInputFlag1 bits (bit set = contact open, see DI_NO_Flag)
+#define DI_UNITON           0x0001
+#define DI_RESET            0x0002
+#define DI_MAINCONAUX       0x0004
+#define DI_HSTEMP           0x0040
+#define DI_EPO              0x0080
+
+// Relay outputs (RelayFlag bits), board_pin_map.h RLYx_GPIO
+#define DO_PRECHARGE        0x0001      // RLY11 (GPIO61, onboard) precharge contactor
+#define DO_MAINSCON         0x0002      // RLY12 (GPIO59, onboard) main contactor
+#define DO_PFCOK            0x0004      // RLY3  PFC OK
+#define DO_COMMONFAULT      0x0008      // RLY4  common fault
+
+// PFC carrier, up-down count at TBCLK = SYSCLK = 150 MHz:
 // TBPRD = 150 MHz / (2 x fsw) = 75000 / fsw[kHz]
-#define UPDATE_INV_FSW() \
-    if((FSW_Inverter<6) || (FSW_Inverter>24)) FSW_Inverter = 12; \
-    InvPwmPeriod = (N16) (75000.0/FSW_Inverter); \
-    Inv_HalfPeriod =  InvPwmPeriod >>1; \
-    EPwm1Regs.TBPRD = InvPwmPeriod; \
-    EPwm2Regs.TBPRD = InvPwmPeriod; \
-    EPwm3Regs.TBPRD = InvPwmPeriod
+#define UPDATE_PFC_FSW() \
+    if((FswPFC<6) || (FswPFC>24)) FswPFC = 10; \
+    PFCPwmPeriod = (N16) (75000.0/FswPFC); \
+    PFC_HalfPeriod =  PFCPwmPeriod >>1; \
+    EPwm1Regs.TBPRD = PFCPwmPeriod; \
+    EPwm2Regs.TBPRD = PFCPwmPeriod; \
+    EPwm3Regs.TBPRD = PFCPwmPeriod
 
 //#define HZ60
 #define SAMPLING_TIME       0.0000500
 
 #ifdef HZ60
-    #define SAMPLING_TIME       0.0000500
     #define GRID_FREQ           60
     #define OMEGADEFAULT        (0.0188684243)
     #define PLL_LOCK_MIN        (0.017925003)
@@ -84,7 +95,6 @@ typedef signed char S8;
     #define QUARTERCYCLE        83
     #define FULLCYCLE           333
     #define MINPOINTS           300
-    #define SLEWRATE_FACT       2200
     #define MAXPOINTS           360
     #define OMEGA_FACTOR        (3183.098916)
 #else
@@ -95,49 +105,49 @@ typedef signed char S8;
 #define QUARTERCYCLE        100
 #define FULLCYCLE           400
 #define MINPOINTS           360
-#define SLEWRATE_FACT       2200
 #define MAXPOINTS           440
 #define OMEGA_FACTOR        (3183.098916)
 #endif
 
 
-#define	OMEGAFACTOR			107944
 #define CMD_DEFAULT     555
 
 #define RESET_FAULTS()  \
               chkVr.stat.bit.HIGH = FALSE;      \
-              chkIr1.stat.bit.HIGH = FALSE;      \
-              chkIr2.stat.bit.HIGH = FALSE;      \
-              chkIr3.stat.bit.HIGH = FALSE;      \
-              chkFrequency.stat.bit.HIGH = FALSE;      \
-              chkVbypr.stat.bit.HIGH = FALSE;      \
-              chkVbat.stat.bit.HIGH = FALSE;      \
-              chkIbat.stat.bit.HIGH = FALSE;      \
+              chkVy.stat.bit.HIGH = FALSE;      \
+              chkVb.stat.bit.HIGH = FALSE;      \
+              chkIr.stat.bit.HIGH = FALSE;      \
+              chkIy.stat.bit.HIGH = FALSE;      \
+              chkIb.stat.bit.HIGH = FALSE;      \
+              chkdcLink.stat.bit.HIGH = FALSE;  \
               SystemFlag.bit.TRIPFAULT = FALSE;   \
               SystemFlag.bit.LATCHFAULT = FALSE;   \
               SystemFlag.bit.VCESAT = FALSE;   \
               SystemFlag.bit.OVERLOAD = FALSE;   \
-              LimitFlag.all &= 0x8800;  \
+              SystemFlag.bit.OCTRIP = FALSE;   \
+              SystemFlag.bit.DCOVTRIP = FALSE;   \
+              SystemFlag.bit.DITRIP = FALSE;   \
+              ACLimitFlag.all &= 0x71FF;  \
+              DCLimitFlag.bit.DCOV_TRIP = FALSE;  \
               EmergencyStop = 0; \
               TripCount = 0
 
 #define AUTO_RESET_FAULTS()  \
               chkVr.stat.bit.HIGH = FALSE;      \
-              chkIr1.stat.bit.HIGH = FALSE;     \
-              chkIr2.stat.bit.HIGH = FALSE;     \
-              chkIr3.stat.bit.HIGH = FALSE;     \
-              chkFrequency.stat.bit.HIGH = FALSE; \
-              chkVbypr.stat.bit.HIGH = FALSE;     \
-              chkVbat.stat.bit.HIGH = FALSE;      \
-              chkIbat.stat.bit.HIGH = FALSE;      \
+              chkVy.stat.bit.HIGH = FALSE;      \
+              chkVb.stat.bit.HIGH = FALSE;      \
+              chkIr.stat.bit.HIGH = FALSE;      \
+              chkIy.stat.bit.HIGH = FALSE;      \
+              chkIb.stat.bit.HIGH = FALSE;      \
+              chkdcLink.stat.bit.HIGH = FALSE;  \
               SystemFlag.bit.TRIPFAULT = FALSE;   \
               SystemFlag.bit.VCESAT = FALSE;      \
               SystemFlag.bit.OVERLOAD = FALSE;    \
-              SystemFlag.bit.TRIPFAULT = FALSE;   \
-              SystemFlag.bit.VCESAT = FALSE;      \
-              SystemFlag.bit.OVERLOAD = FALSE;    \
-              EmergencyStop = 0; \
-              LimitFlag.all = 0
+              SystemFlag.bit.OCTRIP = FALSE;   \
+              SystemFlag.bit.DCOVTRIP = FALSE;   \
+              SystemFlag.bit.DITRIP = FALSE;   \
+              ACLimitFlag.all &= 0x71FF;  \
+              DCLimitFlag.bit.DCOV_TRIP = FALSE
 
 #define SET_DO(DO_PIN)  \
     GPIO_SetupPinMux(DO_PIN,GPIO_MUX_CPU1,0);   \
@@ -163,24 +173,22 @@ typedef signed char S8;
 #define EnableTX1()  GpioDataRegs.GPBSET.bit.GPIO40  = 1    // RS485 #1 (SCIB) TXEN = transmit
 #define DisableTX1() GpioDataRegs.GPBCLEAR.bit.GPIO40   = 1 // RS485 #1 (SCIB) TXEN = receive
 
-#define EnableRLY1()   GpioDataRegs.GPBSET.bit.GPIO60  = 1  // RLY1 = GPIO60 (board_pin_map.h)
-#define DisableRLY1()  GpioDataRegs.GPBCLEAR.bit.GPIO60    = 1
-
 #define ENABLE_RTC()       GpioDataRegs.GPBSET.bit.GPIO57  = 1    // no RTC: EEPROM deselected only
 #define DISABLE_RTC()
 #define ENABLE_EEPR()      GpioDataRegs.GPBCLEAR.bit.GPIO57 = 1   // 25LC512 /CS (GPIO57)
 #define DISABLE_EEPR()     GpioDataRegs.GPBSET.bit.GPIO57 = 1
 #define DISABLE_SPI()      GpioDataRegs.GPBSET.bit.GPIO57 = 1
 
-// Bridge 1 (EPWM1-3) on/off through the one-shot trip. ENABLE also clears a
-// latched hardware desaturation trip (DCAEVT1, VCESAT1 - see DesatTripInit()).
-#define DISABLE_PWM()   __asm(" EALLOW");  \
+// Bridge 1 (EPWM1-3) = PFC bridge, on/off through the one-shot trip. ENABLE also
+// clears a latched hardware desaturation trip (DCAEVT1, VCESAT1 - DesatTripInit())
+// and an instantaneous trip forced by the control sample (ctl_protect).
+#define DISABLE_PFCPWM()   __asm(" EALLOW");  \
                         EPwm1Regs.TZFRC.bit.OST = 0x1; \
                         EPwm2Regs.TZFRC.bit.OST = 0x1; \
                         EPwm3Regs.TZFRC.bit.OST = 0x1; \
                         pulseON = 0;                   \
                         __asm(" EDIS")
-#define ENABLE_PWM()    __asm(" EALLOW");  \
+#define ENABLE_PFCPWM()    __asm(" EALLOW");  \
                         EPwm1Regs.TZCLR.bit.DCAEVT1 = 0x1; \
                         EPwm2Regs.TZCLR.bit.DCAEVT1 = 0x1; \
                         EPwm3Regs.TZCLR.bit.DCAEVT1 = 0x1; \
@@ -190,7 +198,7 @@ typedef signed char S8;
                         pulseON = 1;                   \
                         __asm(" EDIS")
 
-// Bridge 2 (EPWM4-6, CON19) is not used by the inverter: held off permanently,
+// Bridge 2 (EPWM4-6, CON19) is not used by the PFC: held off permanently,
 // by a one-shot trip (TZ force low) and a continuous software force low on A and B
 #define BRIDGE2_OFF()   EPwm4Regs.AQSFRC.bit.RLDCSF = 3; EPwm4Regs.AQCSFRC.all = 0x5; \
                         EPwm5Regs.AQSFRC.bit.RLDCSF = 3; EPwm5Regs.AQCSFRC.all = 0x5; \
@@ -209,14 +217,6 @@ typedef signed char S8;
 #define	BAUD38400			121
 #define	BAUD57600			 80
 #define	BAUD115200			 40
-
-#define	MIN5COUNT			300
-#define	MIN1COUNT			60
-#define	MIN2COUNT			120
-#define	RESTARTDELAY		20
-#define	SHORTCIRCUITDELAY	50
-
-
 
 #define     SPI_TIME        0x2    //for spi_error
 
@@ -237,28 +237,12 @@ typedef signed char S8;
 #define     EP_SERIAL       0x30    //location 0x20 & 0x21 in RTC NVRAM
 #define     LOGSTART        0x2000  // 25LC512: event log above the parameter areas
 
-// EEPROM layout IDs. Not the rectifier's 0x4142 / 0x4344: a board that held the
-// 12-pulse rectifier firmware must load inverter defaults, not rectifier values.
-#define     MAGIC           0x4943  // "IC" inverter float params
-#define     MAGIC1          0x4944  // "ID" inverter int params
+// EEPROM layout IDs. Not the inverter's 0x4943 / 0x4944 or the rectifier's: a
+// board that held other firmware must load PFC defaults, not foreign values.
+#define     MAGIC           0x5046  // "PF" PFC float params
+#define     MAGIC1          0x5047  // "PG" PFC int params
 #define     NPARAMS         200
 #define     CANRXID         0x200
-
-#define POS_MSEC	0
-#define POS_SEC		1
-#define POS_MIN		2
-#define POS_HR		3
-#define POS_DOW		4
-#define POS_DATE	5
-#define POS_MONTH	6
-#define POS_YEAR	7
-
-
-#define	    RECORDNUMLOC	4
-#define     IDLOC			10
-#define     E_PARSTART		0x10
-#define     E_SERSTART		0xA0
-#define	    F_MSGSTART		4096
 
 #define		TRUE			1
 #define		FALSE			0
@@ -306,16 +290,6 @@ typedef signed char S8;
 #define	BITC14    	0xBFFF
 #define	BITC15    	0x7FFF
 
-#define	DI0DELAY	2000
-#define	DI1DELAY	2000
-#define	DI2DELAY	2000
-#define	DI3DELAY	1000
-#define	DI4DELAY	1000
-#define	DI5DELAY	100
-#define	KBDDELAY	100
-
-#define	CON1DELAY	4
-
 
 	typedef struct RtcType {
 		N8 Second;
@@ -327,8 +301,6 @@ typedef signed char S8;
 		N8 Year;
 	} RtcType;
 	//Bit Definitions
-
-    #define 	Nop()	__asm(" NOP")
 
 typedef struct PARAM {
     float32_t MinValue;      	// 0
@@ -385,48 +357,23 @@ typedef struct
 MIN_MAX;
 
 
-struct PARSTAT_BITS {
-    Uint16 POWERINGUP :1;           // 0
-    Uint16 INVRTRDISABL:1;          // 1
-    Uint16 SOFTSTART :1;            // 2
-    Uint16 LOADONBAT :1;            // 3
-    Uint16 LOADONINV:1;             // 4
-    Uint16 LOADONBYP:1;             // 5
-    Uint16 MANUALBYP:1;             // 6
-    Uint16 WAITMASTER:1;            // 7
-    Uint16 NOTSYNCED :1;            // 8
-    Uint16 TRIPFAULT :1;            // 9
-    Uint16 OUTMCBOFF :1;            // 10
-    Uint16 BYPMCBOFF :1;            //
-    Uint16 INVOK:1;                 // 12
-    Uint16 BYPASSOK:1;              // 13
-    Uint16 MASTER :1;               // 14
-    Uint16 BITSVALID :1;            // 15
-};
-
-typedef union {
-    N16 all;
-    struct PARSTAT_BITS bit;
-} PARSTAT;
-
-//Enable Flag
+// AlarmFlag1 (STAT1)
 struct SYSTEM_BITS {
     Uint16 POWERINGUP :1;           // 0
-    Uint16 INVRTRDISABL:1;          // 1
-    Uint16 SOFTSTART :1;            // 2
-    Uint16 LOADONBAT :1;               // 3
-    Uint16 LOADONINV:1;             // 4
-    Uint16 LOADONBYP:1;             // 5
-    Uint16 MANUALBYP:1;             // 6
+    Uint16 PFCDISABLE :1;           // 1
+    Uint16 PFCSOFTSTART :1;         // 2
+    Uint16 PRECHARGE :1;            // 3
+    Uint16 MAINCON :1;              // 4
+    Uint16 WRONGSEQ :1;             // 5
+    Uint16 GRIDFAIL :1;             // 6
     Uint16 OVERLOAD :1;             // 7
     Uint16 VCESAT :1;               // 8
-    Uint16 INVFAILURE:1;             // 9
-    Uint16 NOTSYNCED :1;            // 10
-    Uint16 OCLVL1ACTIVE:1;       // 11
-    Uint16 OCLVL2ACTIVE:1;       // 12
+    Uint16 OCTRIP :1;               // 9
+    Uint16 DCOVTRIP :1;             // 10
+    Uint16 EPO :1;                  // 11
+    Uint16 DITRIP :1;               // 12
     Uint16 TRIPFAULT :1;            // 13
     Uint16 LATCHFAULT:1;            // 14
-
     Uint16 BITSVALID :1;            // 15
 };
 
@@ -450,82 +397,82 @@ union canPacket {
     float floats[2];
 };
 
-struct LIMIT_BITS {             // bits  description
-    Uint16 BYPRLOW :1;           // 0
-    Uint16 BYPYLOW :1;           // 1
-    Uint16 BYPBLOW :1;           // 2
-    Uint16 BYPRHIGH :1;          // 3
-    Uint16 BYPYHIGH :1;          // 4
-    Uint16 BYPBHIGH :1;          // 5
-    Uint16 VBATLOW    :1;        //6
-    Uint16 VBATHIGH :1;          // 7
-    Uint16 PREALARM :1;          // 8
-    Uint16 DCLINKLOW :1;         // 9
-    Uint16 DCLINKHIGH :1;        // 10
-    Uint16 DCLINKOK :1; // 11
-    Uint16 INVRTROK:1; // 12
-    Uint16 CURMODE:1;       // 13
-    Uint16 BYPASSOK :1; // 14
+// AlarmFlag2 (STAT2), grid side
+struct ACLIMIT_BITS {             // bits  description
+    Uint16 VINPRLOW :1;          // 0
+    Uint16 VINPYLOW :1;          // 1
+    Uint16 VINPBLOW :1;          // 2
+    Uint16 VINPRHIGH :1;         // 3
+    Uint16 VINPYHIGH :1;         // 4
+    Uint16 VINPBHIGH :1;         // 5
+    Uint16 IINPRHIGH :1;         // 6
+    Uint16 IINPYHIGH :1;         // 7
+    Uint16 IINPBHIGH :1;         // 8
+    Uint16 OC_INSTTRIP_R :1;     // 9
+    Uint16 OC_INSTTRIP_Y :1;     // 10
+    Uint16 OC_INSTTRIP_B :1;     // 11
+    Uint16 FREQLOW :1;           // 12
+    Uint16 FREQHIGH :1;          // 13
+    Uint16 NU :1;                // 14
     Uint16 BITSVALID :1;         // 15
 };
-
-#define     INVRTRHILOBITS  0x003F
-#define     INVRTRHIBITS    0x0038
 typedef union {
     N16 all;
-    struct LIMIT_BITS bit;
-} LMTMODE;
+    struct ACLIMIT_BITS bit;
+} ACLMTMODE;
 
-struct LIMIT_BITS1 {                 // bits  description
-    Uint16 INVRLOW :1;            // 0
-    Uint16 INVYLOW :1;            // 1
-    Uint16 INVBLOW :1;            // 2
-    Uint16 INVRHIGH :1;           // 3
-    Uint16 INVYHIGH :1;           // 4
-    Uint16 INVBHIGH :1;           // 5
-    Uint16 OC_LEVEL1_R :1;        // 6
-    Uint16 OC_LEVEL1_Y :1;        // 7
-    Uint16 OC_LEVEL1_B :1;        // 8
-    Uint16 OC_LEVEL2_R:1;         // 9
-    Uint16 OC_LEVEL2_Y:1;         //10
-    Uint16 OC_LEVEL2_B:1;         //11
-    Uint16 OC_LEVEL3_R :1;        // 12
-    Uint16 OC_LEVEL3_Y :1;        // 13
-    Uint16 OC_LEVEL3_B :1;        // 14
-    Uint16 BITSVALID :1;          // 15
+// AlarmFlag3 (STAT3), DC side
+struct DCLIMIT_BITS {             // bits  description
+    Uint16 DCLINKLOW :1;         // 0
+    Uint16 DCLINKHIGH :1;        // 1
+    Uint16 DCLINKOK :1;          // 2
+    Uint16 DCOV_TRIP :1;         // 3
+    Uint16 NU :11;               // 4-14
+    Uint16 BITSVALID :1;         // 15
 };
 typedef union {
     N16 all;
-    struct LIMIT_BITS1 bit;
-} LMTMODE1;
+    struct DCLIMIT_BITS bit;
+} DCLMTMODE;
 
+// AlarmFlag4 high byte (STAT4 bits 8-15)
 struct SYSOK_BITS {             // bits  description
-    Uint16 DINPU1 :1;  // 0
-    Uint16 DINPU2 :1;  // 1
-    Uint16 DINPU3 :1;  // 2
-    Uint16 DINPU4 :1;  // 3
-    Uint16 DINPU5 :1;  // 4
-    Uint16 DINPU6 :1;  // 5
-    Uint16 DINPU7 :1;  // 6
-    Uint16 DINPU8 :1;  // 7
-    Uint16 DINPU9 :1;  // 8
-    Uint16 DINPU10 :1;  // 9
-    Uint16 VINVROK :1;  // 10
-    Uint16 VINVYOK :1;  // 11
-    Uint16 VINVBOK :1;  // 12
-    Uint16 VBYPROK :1;  // 13
-    Uint16 VBYPYOK :1;  // 14
-    Uint16 VBYPBOK :1;  // 15
+    Uint16 VROK :1;          // 0
+    Uint16 VYOK :1;          // 1
+    Uint16 VBOK :1;          // 2
+    Uint16 INPUTOK :1;       // 3
+    Uint16 DCLINKOK :1;      // 4
+    Uint16 PRECHARGEOK :1;   // 5
+    Uint16 SYNCOK :1;        // 6
+    Uint16 MAINCONCLOSED :1; // 7
+    Uint16 NU :8;            // 8-15
 };
 typedef union {
     N16 all;
     struct SYSOK_BITS bit;
 } OKMODE;
 
+// AlarmFlag5 (STAT5)
+struct STAT_BITS {
+    Uint16 PFCENABLE :1;     // 0
+    Uint16 TEST_MODE :1;     // 1
+    Uint16 RLYPRECHRG :1;    // 2
+    Uint16 RLYMAINCON :1;    // 3
+    Uint16 RLYPFCOK :1;      // 4
+    Uint16 RLYFAULT :1;      // 5
+    Uint16 DMAXRAMP :1;      // 6
+    Uint16 PRMODE :1;        // 7
+    Uint16 NU :7;            // 8-14
+    Uint16 BITSVALID :1;     // 15
+};
+typedef union {
+    N16 all;
+    struct STAT_BITS bit;
+} STATMODE;
+
 struct COMMOK_BITS {             // bits  description
-    Uint16 CAN_PFC :1;  // 0
-    Uint16 CAN_MASTER :1;  // 1
-    Uint16 CAN_SLAVE :1;  // 2
+    Uint16 CAN_DISP :1;  // 0
+    Uint16 NZ1 :2;       // 1-2
     Uint16 RS485_LIVE :1;  // 3
     Uint16 NZD :11;  // 4-14
 
@@ -548,35 +495,29 @@ typedef struct eventPacket {
 	N16 alarm4;
 	N16 alarm5;
 	N16 alarm6;
-	N16	eVinvR;
-	N16	eVinvY;
-	N16	eVinvB;
-	N16	eVbypR;
-	N16	eVbypY;
-	N16	eVbypB;
-	N16 eIinvR;
-	N16 eIinvY;
-	N16 eIinvB;
-	N16	ekVA_R;
-	N16	ekVA_Y;
-	N16	ekVA_B;
-	N16	ekW_R;
-	N16	ekW_Y;
-	N16	ekW_B;
-	N16	InvFreq;
-	N16	BypFreq;
+	N16	eVinpRY;
+	N16	eVinpYB;
+	N16	eVinpBR;
+	N16 eIinpR;
+	N16 eIinpY;
+	N16 eIinpB;
+	N16	eDcLink;
+	N16	eDcLinkRef;
+	N16	ekW_Total;
+	N16	ekVA_Total;
+	N16	eFreq;
 	N16	eVbat;
-	N16	DcLinkV;
 	N16	eIbat;
+	N16	eTemp1;
+	N16	eTemp2;
+	N16	eReason;
 	N16	notUsed00;
 	N16	notUsed01;
+	N16	notUsed02;
+	N16	notUsed03;
+	N16	notUsed04;
+	N16	notUsed05;
 } eventPacket;
-
-/* future plan:
- * max of all analog values, 10 x 10 x 3
- * for last 10 cycles
- *
- */
 
 
 
@@ -589,15 +530,11 @@ void		update_datablock(void);
 N16 		update_one(unsigned int, unsigned int);
 
 void		GpioInit(void);
-void		EPwmInit();
-void		AdcInit();
-void		InitTimers();
 void		InitSCIA(N16 Baud);
 void        InitSCIB(void);
 void        InitFaultXbar(void);
 void        InitMCANPins(void);
 void        DesatTripInit(void);
-void        StaticSwitchDrivesInit(void);
 void        AdcTriggerInit(void);
 void		UpdateDigitalIO(void);
 void		scia_xmit(int a);
@@ -607,117 +544,62 @@ void		scib_xmit(int Ch);
 void		scib_msg(char *msg);
 
 void		InitVariables(void);
-inline		void	CurrentLimit(void);
-inline		void	rmsCal(void);
-void		InverterApplication(void);
-void		ePWMInit(void);
-interrupt	void	EPwmISR(void);
+void		PfcApplication(void);
 interrupt	void	AdcISR(void);
 interrupt	void	SCIRxISR(void);
 
-void		setPiRegulator(PI_CONTROLLER *p, float32_t kp, float32_t ki, float32_t ui, float32_t umax, float32_t umin);
 void		setLowPassFilter(LPF *f, float32_t T, float32_t y);
-N16			eepr_status(N16 chipnum);
 void		eeprom_write(Uint16 addr, N8 nbytes);
 void		eeprom_read(Uint16 addr, N8 nbytes);
 void		spi_init(void);
 N8          write_enable(void);
 void        storeArrayToEEPROM(void);
-void        sendLog(N16 nPkt);
 void        storeEvents(void);
-void        saveRecordNumber(void);
 void        EraseEventLog(void);
 
-void		AdcOffsetSelfCal(void);
 void		snapShot(N16 st_addr);
 void		initRmsMeter(rms_meter *r);
 void		update_rmsmeters(void);
 void		updateStatus(void);
-void 		InitStructs(void);
 
-N8			toHex(N8 k);
 void		RestoreSettings(void);
 N16			UpdateOne(N16 adr, float32_t val);
-N8 			StoreValue(N16 adr, N16 Value);
-N16			readCANmsg();
 void		InitECAN(void);
-void		CanbusProcessing(void);
 N16			TableCRC(BYTE *nData, WORD wLength);
-N16			txCanPacket(N16 packetNo);
 void		EventLogging(void);
 void		updateRAMvalues(N16 adr);
-void		SendDummyCanPacket(void);
 void		SetFactoryDefaults(void);
-void		updateReference(N16 adr, int x);
-void 		SetPWM_Zero();
-
-void 		setHarmonicOscillator(sincos* t);
 
 void		getCompiledDate(void);
-void		updateSerial(void);
-void 		InitADC(void);
 
 N8		asc2Dec(char c1, char c2);
 N8		findMonth(char c1, char c2, char c3);
 
-void 	eepromWriteArray(BYTE addr, BYTE* vData, WORD wLen);
-void 	eepromReadArray(BYTE addr, BYTE *vData, BYTE wLength);
-N8		ReadRTCCStatus(void);
-void 	SPIFlashInit(void);
 N16 	ReadRecordPointer(void);
-N16		readEEPROM(N8 adr);
-N16		writeEEPROM(N8 adr, N16 val);
-void 	ReadSerial(void);
-void	RTCwriteByte(BYTE addr, BYTE val);
-void 	SaveSerialArray2EEPROM(void);
 void 	delay_ms(N16 n1);
-N16 	RestoreValue(N8 adr, N16 Max, N16 Min, N16 defval);
 void    InitMCAN(void);
-float32_t 	phaseLockedLoop(float32_t va, float32_t vb, float32_t vc);
 
-N8		findBit(N8 start, N16 flag);
-void	SelectMessage3(void);
-void    InitPhaseLockedLoop(void);
-void    ePWMInitBuck(void);
-void    SetPiRegulator( PI_CONTROLLER *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin);
 void    ConfigureADC(void);
 void    setupADC(uint16_t trig_sel, uint16_t acqps);
 void    InitHiLo(MIN_MAX *x, float32_t *v1, float32_t *hlmt, float32_t *llmt, float32_t *hdly, float32_t *ldly);
-void    CheckHi(MIN_MAX *x);
 void    CheckHiLo(MIN_MAX *x);
-void    CheckHiLoH(MIN_MAX *x);
 void    InitHiLoParams(void);
-inline void getReferenceVoltage(void);
-void    ePWMInit_INV(N16 ch1, N16 ch2, N16 ch3 );
-void    ePWMInit_SMPS(N16 chnl1, N16 chnl2);
+void    ePWMInit_PFC(N16 ch1, N16 ch2, N16 ch3 );
 N16     CRC16(N16 *dat, N16 nbytes);
 void    update_datablock_Int(void);
-inline void StaticSwitchControl(void);
 void    InitDrives(N16 ch1);
-void    PID_GRANDO_F_init(PID_GRANDO_F_CONTROLLER *v);
-void    InitPID(PID_GRANDO_F_CONTROLLER *v);
-void    setPIDRegulator(PID_GRANDO_F_CONTROLLER *p, float32_t kp, float32_t ki, float32_t kd,  float32_t kr, float32_t km, float32_t umax, float32_t umin);
 void    setPiRegulator_old(PIreg *p, float32_t kp, float32_t ki, float32_t ui, float32_t umax, float32_t umin);
+void    SetPfcPI(PFC_PI *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin);
 void    RestoreSettingsInt(void);
 void    storeArrayToEEPROMInt(void);
 void    SetFactoryDefaultsInt(void);
 N16     UpdateOneInt(N16 adr, int val);
 N16     eeprom_read_word(Uint16 addr);
 N16     eeprom_write_word(Uint16 addr, N16 val);
-void    InitPLL_1ph(void);
 void    UpdateRelayFlag(void);
 void    UpdateRelays(void);
-void    InitDACs(void);
-void    configureDAC(uint16_t dac_num);
-void    UpdateDAC(N16 channel, N16 val);
-void WriteRecordPointer(void);
-void setPIRegulator(PI_CONTROLLER *p, float32_t kp, float32_t ki, float32_t umax, float32_t umin);
-void StaticSwitchControl_Master(void);
-void StaticSwitchControl_Slave(void);
+void    WriteRecordPointer(void);
 void    MCANBusProcessing(void);
-N16     ParTransmit(N16 id, long v1, long v2);      // CAN-B paralleling frame
 N16     MCANBusOff(void);
-inline void    NormalOperation(void);
 void    PR_Reset(void);
-void    PR_UpdateCoeffs(void);
-#endif	//__USINV25KVA_H__
+#endif	//__PFC3PHDEFINES_H__

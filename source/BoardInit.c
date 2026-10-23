@@ -8,12 +8,13 @@
  *  MCU   : TMS320F28P550SG9PZR (100-pin PZ)
  *  Pin numbers / signal names follow board_pin_map.h.
  *
- *  3-phase inverter use of the common board:
- *   - ePWM1..3 A/B (GPIO0..5)  : inverter bridge 1 (U30 -> CON15)
+ *  3-phase PFC use of the common board:
+ *   - ePWM1..3 A/B (GPIO0..5)  : PFC bridge 1 (U30 -> CON15)
  *   - ePWM4..6 A/B (GPIO6..11) : bridge 2 (CON19), not used, held off
- *   - ePWM7 A/B (GPIO12/13)    : static switch gate pulse trains
- *                                (STAT_INV / STAT_BYP), StaticSwitchDrivesInit()
+ *   - GPIO12/13 (STAT_INV/BYP) : not used, plain outputs held low
  *   - ePWM8 module             : ADC trigger timebase only (AdcTriggerInit, pwm.c)
+ *   - RLY11 (GPIO61) precharge, RLY12 (GPIO59) main contactor (onboard),
+ *     RLY3 PFC OK, RLY4 common fault
  */
 
 #define CCEXTERN    extern
@@ -35,7 +36,7 @@
 //--------------------------------------------------------------------------
 // RS485 direction control (ISO3082: DE and /RE tied, 1 = transmit)
 //   RS485 #1 : SCIB, TXEN1 = GPIO40
-//   RS485 #2 : SCIA, TXEN  = GPIO34  (EnableTX()/DisableTX() in inv3phDefines.h)
+//   RS485 #2 : SCIA, TXEN  = GPIO34  (EnableTX()/DisableTX() in pfc3phDefines.h)
 //--------------------------------------------------------------------------
 #define SCIA_TX_ENABLE()    GPIO_WritePin(RS485_2_TXEN_GPIO, 1)
 #define SCIA_TX_DISABLE()   GPIO_WritePin(RS485_2_TXEN_GPIO, 0)
@@ -129,7 +130,7 @@ void GpioInit(void)
     // STAT_USE_EPWM7 = 1: gate pulse trains from EPWM7A/B (inverter).
     // 0: plain GPIO outputs.
 #ifndef STAT_USE_EPWM7
-#define STAT_USE_EPWM7  1       // inverter: gate pulse trains from EPWM7 (pwm.c)
+#define STAT_USE_EPWM7  0       // PFC: no static switch, outputs held low
 #endif
     GpioCtrlRegs.GPAPUD.bit.GPIO12      = 1;    // STAT_INV  pin 51
     GpioCtrlRegs.GPAPUD.bit.GPIO13      = 1;    // STAT_BYP  pin 50
@@ -394,9 +395,10 @@ void ConfigureADC(void)
  *  D   Vr_inv D14  Vb_out D15  Vy_out D12  Ibat D11        -
  *  E   Ib_ind E11  Vy_inv E12  Vr_out E16  -               -
  *
- * 3-phase inverter: all channels of the table above are converted (A14 reads
- * Vb_byp, selected by a link on the board). Results are read in AdcISR
- * (interrupt.c) into AnalogInput1..21 (labels in inv3phParams.h).
+ * 3-phase PFC: all channels of the table above are converted (A14 reads
+ * Vb_byp, selected by a link on the board). Grid voltage = Vr/y/b_byp, PFC
+ * current = Ir/y/b_ind, DC link C0. Results are read in ctl_acquire()
+ * (controlCore.h) into AnalogInput1..21 (labels in pfc3phParams.h).
  * EOC: ADCA INT1 on EOC4 (A, B, C each have 5 conversions; D, E finish earlier).
  */
 #define SET_SOC(REGS, N, CH)                        \

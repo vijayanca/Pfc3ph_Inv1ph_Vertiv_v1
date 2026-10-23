@@ -1,11 +1,12 @@
 /*
  * cla_tasks.cla
  *
- * CLA1 tasks: the inverter control loop (controlCore.h) when CONTROL_ON_CLA = 1.
- *   Task 1  ADCA INT1 (EPWM8 SOCA, 20 kHz): measurements, voltage / current
- *           controllers, RMS accumulation. End of task -> CPU ClaTask1EndISR
- *           (PLL, angles, sync, paralleling) for the next sample.
- *   Task 2  EPWM1 INT (counter zero, inverter PWM rate): SVPWM, dead-time
+ * CLA1 tasks: the PFC control loop (controlCore.h) when CONTROL_ON_CLA = 1.
+ *   Task 1  ADCA INT1 (EPWM8 SOCA, 20 kHz): measurements, instantaneous
+ *           trips, DC-link and current controllers, RMS accumulation. End of
+ *           task -> CPU ClaTask1EndISR (trip flags, PLL, grid angle, zero
+ *           cross) for the next sample.
+ *   Task 2  EPWM1 INT (counter zero, PFC PWM rate): SVPWM, dead-time
  *           compensation, CMPA of EPWM1-3.
  *   Task 8  software, once from claInit(): state set up.
  * Data: claShared.h (Cla1DataRam, RAMLS67). Set up by claInit.c.
@@ -17,7 +18,7 @@
 #define INITARRAY0
 #include <stdint.h>          // before f28x_project.h: f28p55x_cla_typedefs.h uses uint16_t
 #include "f28x_project.h"
-#include "../inv3phParams.h"
+#include "../pfc3phParams.h"
 #include "../controlMacros.h"
 #include "../claShared.h"
 #include "../controlCore.h"

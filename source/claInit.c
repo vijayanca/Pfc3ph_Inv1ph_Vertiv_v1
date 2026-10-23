@@ -1,13 +1,13 @@
 /*
  * claInit.c
  *
- * CLA1 set up for the inverter control loop (CONTROL_ON_CLA = 1), after
+ * CLA1 set up for the PFC control loop (CONTROL_ON_CLA = 1), after
  * C2000Ware driverlib/f28p55x/examples/cla/cla_asin_ls8_9.c:
  *   LS8 + LS9  CLA program (Cla1Prog, copied from flash)
  *   LS5        CLA data: scratchpad, .bss_cla, .const_cla
  *   LS6 + LS7  CLA data: Cla1DataRam, the CPU/CLA shared variables (claShared.h)
  *   Task 1 <- ADCA INT1 (EPWM8 SOCA, 20 kHz), end of task -> CPU ClaTask1EndISR
- *   Task 2 <- EPWM1 INT (inverter PWM, counter zero)
+ *   Task 2 <- EPWM1 INT (PFC PWM, counter zero)
  *   Task 8 <- software, run once here (ctl_init)
  * Called from main() after setupADC() and the PIE set up, before EINT.
  */
@@ -33,9 +33,6 @@ extern __attribute__((interrupt)) void Cla1Task5(void);
 extern __attribute__((interrupt)) void Cla1Task6(void);
 extern __attribute__((interrupt)) void Cla1Task7(void);
 extern __attribute__((interrupt)) void Cla1Task8(void);
-
-// 1 when the CLA sees the same CTL_SHARED size as the CPU (claShared.h layout)
-volatile uint16_t claLayoutOK = 0;
 
 static void claConfigMemory(void)
 {
@@ -95,6 +92,7 @@ void claInit(void)
     CLA_forceTasks(CLA1_BASE, CLA_TASKFLAG_8);
     while (CLA_getTaskRunStatus(CLA1_BASE, CLA_TASK_8) ||
            (CLA_getPendingTaskFlag(CLA1_BASE, CLA_TASK_8))) {};
+    // 1 when the CLA sees the same CTL_SHARED size as the CPU (claShared.h layout)
     claLayoutOK = (ctl.claLayout == (uint16_t)sizeof(CTL_SHARED));
 
     CLA_setTriggerSource(CLA_TASK_1, CLA_TRIGGER_ADCA1);

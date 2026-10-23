@@ -19,12 +19,10 @@ typedef float float32_t;    // f28p55x_cla_typedefs.h defines float32 only
 #include "SVGEN_CLA.h"
 
 // Control loop (controlCore.h) on the CLA: 1, or on the CPU in AdcISR /
-// EPWM_INV_ISR: 0. Same code and data either way, for A/B checks.
+// EPWM_PFC_ISR: 0. Same code and data either way, for A/B checks.
 #ifndef CONTROL_ON_CLA
 #define CONTROL_ON_CLA      1
 #endif
-
-#define SHIFTED_FBACK                           // feedback angle = inverter angle + Angle30 (theta_fb)
 
 #define FLOAT_CONVERTER_DC    0.000244140625    // 1/4096, ADC counts -> p.u.
 #define FLOAT_CONVERTER_AC    0.00048828125     // 2/4096
@@ -58,15 +56,6 @@ typedef struct {
     float32_t Umax, Umin;
 } PIreg;
 
-typedef struct
-{
-    LPF lpf_de, lpf_qe;
-    PIreg pi_de, pi_qe;
-    float32_t ref_d, ref_q;
-}
-harmonic;
-
-
 #define PIREGULATOR(x)  \
     x.Err = x.Ref - x.Fbk; \
     x.ui = x.ui + (x.Ki * x.Err); \
@@ -77,36 +66,57 @@ harmonic;
     else if(x.Out < x.Umin) x.Out = x.Umin
 
 
-// Resonant (PR) voltage controller, stationary alpha-beta frame
-#define PR_NHARM        4           // 5th, 7th, 11th, 13th
-#define PR_FUND_LIMIT   0.96
-
-// Open-loop test (VoltCtrlMode = 2): fixed balanced modulation, no voltage feedback,
-// ramped 0 -> OL_MOD_MAX in 1 s. Same limit as the PI/PR controller outputs.
-#define OL_MOD_MAX      0.96
-#define OL_MOD_STEP     (OL_MOD_MAX * SAMPLING_TIME / 1.0)
-
+// PI with clamped anti-windup (RBC pid_update): the integrator is committed
+// only while the output is inside its limits, or when the error pulls it back in.
 typedef struct {
-    float32_t Y;        // in-phase state
-    float32_t X;        // quadrature state
-    float32_t out;
-} PR_STATE;
+    float32_t Ref, Fbk, Err;
+    float32_t Kp, Ki;
+    float32_t Out;
+    float32_t Umax, Umin;
+    float32_t ui;
+} PFC_PI;
 
+#define PFC_PI_MACRO(p)                                                     \
+{                                                                           \
+    float32_t i_, u_, o_;                                                   \
+    p.Err = p.Ref - p.Fbk;                                                  \
+    i_ = p.ui + (p.Ki * p.Err);                                             \
+    u_ = (p.Kp * p.Err) + i_;                                               \
+    o_ = u_;                                                                \
+    if(o_ > p.Umax) o_ = p.Umax;                                            \
+    else if(o_ < p.Umin) o_ = p.Umin;                                       \
+    if((o_ == u_) || ((u_ > p.Umax) && (p.Err < 0.0f)) ||                   \
+                     ((u_ < p.Umin) && (p.Err > 0.0f))) p.ui = i_;          \
+    p.Out = o_;                                                             \
+}
+
+// Resonant integrator pair for the PR current controller (stationary frame)
+//   v1' = Kr*e - w*v2 - 2*wc*v1 ,  v2' = w*v1   ->  v1 = Kr*s/(s^2 + 2wc*s + w^2) * e
 typedef struct {
-    float32_t a;        // 2*sin(h*w*Ts/2) -> exact discrete resonance at h*w
-    float32_t c, s;     // cos/sin of phase lead (delay compensation)
-} PR_COEF;
+    float32_t v1;   // resonant output
+    float32_t v2;   // quadrature state
+} PR_RES;
 
-// Two-integrator resonator: Y += k*e - wd*Y - a*X ; X += a*Y ; out = c*Y - s*X
-#define PR_RES_MACRO(r,k,e,cf,wd,lim) \
-    r.Y = r.Y + ((k) * (e)) - ((wd) * r.Y) - (cf.a * r.X); \
-    if(r.Y > (lim)) r.Y = (lim); \
-    else if(r.Y < -(lim)) r.Y = -(lim); \
-    r.X = r.X + (cf.a * r.Y); \
-    if(r.X > (lim)) r.X = (lim); \
-    else if(r.X < -(lim)) r.X = -(lim); \
-    r.out = (cf.c * r.Y) - (cf.s * r.X)
+#define PR_STATE_LIM    1.0f        // safety clamp only; anti-windup is the clamp in ctl_current
 
+// forward Euler on v1, backward Euler on v2: poles stay on the unit circle for damp2 = 0
+#define PR_RES_MACRO(r,e,kr,w,damp2)                                                    \
+    r.v1 += (float32_t)SAMPLING_TIME * ((kr)*(e) - (w)*r.v2 - (damp2)*r.v1);            \
+    if(r.v1 >  PR_STATE_LIM) r.v1 =  PR_STATE_LIM;                                      \
+    if(r.v1 < -PR_STATE_LIM) r.v1 = -PR_STATE_LIM;                                      \
+    r.v2 += (float32_t)SAMPLING_TIME * ((w)*r.v1);                                      \
+    if(r.v2 >  PR_STATE_LIM) r.v2 =  PR_STATE_LIM;                                      \
+    if(r.v2 < -PR_STATE_LIM) r.v2 = -PR_STATE_LIM
+
+#define PR_RES_CLEAR(r)     r.v1 = 0.0f; r.v2 = 0.0f
+
+// PFC current controller: dq feedback filters and PI regulators
+typedef struct
+{
+    LPF lpf_de, lpf_qe;
+    PFC_PI pid_de, pid_qe;
+}
+PFC_CTRL;
 
 
 // For Current Limiter
@@ -117,36 +127,5 @@ typedef struct                                      //VCA
     float32_t savedSum;
     float RMS;
 } rms_meter;
-/*************************** STRUCTURE DECLARATIONS *************************/
-
-
-
-typedef struct
-{
-        float32_t a, b, c;
-        float32_t d, q, z;
-        float32_t de, qe;
-        LPF lpf_de, lpf_qe;
-        PID_GRANDO_F_CONTROLLER pid_de, pid_qe;
-        float32_t ref_d, ref_q;
-        float32_t ref_a, ref_b, ref_c;
-} DQControl;
-
-
-typedef struct                                      //VCA
-{
-    DQControl vol;
-    float32_t deo;
-    float32_t qeo;
-    float32_t alpha;
-    float32_t beta;
-    float32_t refa;
-    float32_t refb;
-    float32_t refc;
-    sincos theta;
-    sincos theta_o;
-    float32_t omeaga;
-}
-VolControl;
 
 #endif /* CONTROLTYPES_H_ */

@@ -10,6 +10,6 @@
 	<rts value="libc.a"/>
 	<templateProperties value="id=com.ti.common.project.core.emptyProjectWithMainTemplate,"/>
 	<isTargetManual value="false"/>
-	<origin value="F:/Projects/2026/GETek/Rectifier_DSP/Software/Firmware/Rect12P_GETEK_v4"/>
+	<origin value="D:/Projects/2026/Vertiv/CommonPlatform/Software/Rectifier/Firmware/Rect12P_VERTIV_v1"/>
 	<activeTargetConfiguration value="targetConfigs/TMS320F28P550SJ6.ccxml"/>
 </projectOptions>

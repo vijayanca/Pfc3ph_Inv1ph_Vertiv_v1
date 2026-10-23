@@ -128,19 +128,4 @@
     if(x.Out>x.Umax) x.Out = x.Umax; \
     if(x.Out<x.Umin) x.Out = x.Umin
 
-
-
-//---------STATIC SWITCH CONTROL----------------
-// Common Controller v2: one gate pulse train per source on EPWM7
-// (StaticSwitchDrivesInit, pwm.c); the static switch board fires all three phases.
-//   EPWM7A -> STAT_INV (GPIO12), EPWM7B -> STAT_BYP (GPIO13), via U33 -> CON24
-#define STATIC_DRIVES_OFF()    \
-        EPwm7Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
-        EPwm7Regs.AQCTLB.bit.CBD = AQ_CLEAR
-
-#define EnableInvSS()   EPwm7Regs.AQCTLA.bit.CAD = AQ_SET
-#define DisableInvSS()  EPwm7Regs.AQCTLA.bit.CAD = AQ_CLEAR
-#define EnableBypSS()   EPwm7Regs.AQCTLB.bit.CBD = AQ_SET
-#define DisableBypSS()  EPwm7Regs.AQCTLB.bit.CBD = AQ_CLEAR
-
 #endif /* CONTROLMACROS_H_ */

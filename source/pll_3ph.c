@@ -28,8 +28,8 @@ void NOTCH_FLTR_F_VARS_init(NOTCH_VARS_F *v);
  //  This function is the implementation of Phase Locked Loop
  //  This takes the three phase grid voltage as input and determines omega
  //  required for reference frame transformations
-volatile N16 bypfCount = 0;
-volatile N16 bypokcounter = 0;
+volatile N16 gridfCount = 0;
+volatile N16 gridokcounter = 0;
 
 // DSOGI-PLL: SOGI filters on alpha/beta, positive sequence extraction,
 // amplitude normalised SRF-PLL. No filter inside the loop.
@@ -65,7 +65,8 @@ volatile N16 bypokcounter = 0;
      PIREG_MACRO(pll->pi_pll);
      pll->omega   = pll->pi_pll.Out;
 
-     // filtered d/q for monitoring and bypass-fail detection (outside the loop)
+     // filtered d/q for monitoring, grid-fail detection and the q feed-forward
+     // of the current controller (outside the loop)
      pll->lpf2.u = d;
      LOWPASSFILTER(pll->lpf2);
      vol_de = pll->lpf2.y;
@@ -84,32 +85,26 @@ volatile N16 bypokcounter = 0;
      s = pll->theta_0.sin_val*d - pll->theta_0.cos_val*a;
      c = pll->theta_0.cos_val*d + pll->theta_0.sin_val*a;
 
-#ifndef SHIFTED_FBACK
      pll->theta.sin_val = s;
      pll->theta.cos_val = c;
-#else
-     // rotate by -Angle30 (prRotC/prRotS = cos/sin(Angle30), from PR_UpdateCoeffs)
-     pll->theta.sin_val = s*prRotC - c*prRotS;
-     pll->theta.cos_val = c*prRotC + s*prRotS;
-#endif
 
-     if(vol_de < bypassFailLevel)
+     // fast mains failure: positive sequence below GridFailLevel for 5 samples,
+     // back after 50 samples (2.5 ms) above it
+     if(vol_de < mainsFailLevel)
      {
-             if(bypfCount<5) bypfCount++;
-             if(bypfCount==5)
+             if(gridfCount<5) gridfCount++;
+             if(gridfCount==5)
                  {
-                     bypassFailed = TRUE;
-                     bypokcounter = 0;
-                     SystemFlag.bit.NOTSYNCED = TRUE;
-                     Synced = FALSE;
+                     gridFailed = TRUE;
+                     gridokcounter = 0;
                  }
      }
 
      else
          {
-             if(bypfCount) bypfCount--;
-             if(bypokcounter<50) bypokcounter++;
-             if(bypokcounter==50) { bypassFailed = FALSE; bypfCount = 0; }
+             if(gridfCount) gridfCount--;
+             if(gridokcounter<50) gridokcounter++;
+             if(gridokcounter==50) { gridFailed = FALSE; gridfCount = 0; }
          }
 
 

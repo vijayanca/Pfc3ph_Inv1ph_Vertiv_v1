@@ -20,7 +20,9 @@ void update_datablock_DI(void);
 
 extern SVGEN_CLA svgen_dq1;
 
-N16 DObitAddress[] = {100, 101, 104, 105, 112, 117, 123, 126, 127};
+// Coils 100.. -> int parameter: UnitOnCommand, AcceptReset, TestMode, RevPolarity,
+// PFSign, MainConAuxUsed, UpdateEEPROM (pfc3phParams.h xxx_Bit)
+N16 DObitAddress[] = {100, 101, 102, 111, 112, 115, 123};
 
 // Two Modbus ports with the same register map:
 //   MB_PORT_A = SCIA, RS485 #2 (TXEN GPIO34)
@@ -191,7 +193,7 @@ Uint16  pi_com(N16 port)
 	           case MB_SETDO:
 	                st_addr = ( (Uint16) *(rxbuffer+2)<<8) | *(rxbuffer+3);
 	                nregs =   ((int)*(rxbuffer+4)<<8) | *(rxbuffer+5);
-	                if((st_addr>99) && (st_addr<110))
+	                if((st_addr>99) && (st_addr < (100 + sizeof(DObitAddress)/sizeof(DObitAddress[0]))))
 	                            {
 	                                DOParams[st_addr] = nregs & 0x0001;
 	                                UpdateOneInt(DObitAddress[st_addr-100],nregs & 0x0001);
@@ -392,30 +394,26 @@ Uint16  pi_com(N16 port)
 	}          //if ADDRESS ends here
 	return(picom);
 }
-#define     plot0       vOutR       // output voltages, common-mode removed
-#define     plot1       vOutY
-#define     plot2       vOutB
-#define     plot3       lpf_ioutR.y
-#define     plot4       lpf_ioutY.y
-#define     plot5       lpf_ioutB.y
-#define     plot6       lpf_vbypR.y
-#define     plot7       lpf_vbypY.y
-#define     plot8       lpf_vbypB.y
-#define     plot9       vcontrol.refa
-#define     plot10      vcontrol.refb
-#define     plot11      vcontrol.refc
-#define     plot12      vcontrol.alpha
-#define     plot13      vcontrol.beta
-#define     plot14      prH[0][0].out
-#define     plot15      vcontrol.vol.lpf_de.y
-#define     plot16      pllBypass.theta.sin_val
-#define     plot17      pllBypass.theta_0.sin_val
-#ifdef SHIFTED_FBACK
-    #define     plot18      theta_fb.sin_val
-#else
-    #define plot18      theta_inv.cos_val
-#endif
-#define     plot19      theta_inv.sin_val
+#define     plot0       lpf_vR.y        // grid phase voltages
+#define     plot1       lpf_vY.y
+#define     plot2       lpf_vB.y
+#define     plot3       lpf_iR.y        // PFC currents
+#define     plot4       lpf_iY.y
+#define     plot5       lpf_iB.y
+#define     plot6       lpf_dclink.y
+#define     plot7       vout_alpha      // modulation reference
+#define     plot8       vout_beta
+#define     plot9       pfc.lpf_de.y    // Id, Iq feedback
+#define     plot10      pfc.lpf_qe.y
+#define     plot11      pfc.pid_de.Out
+#define     plot12      pfc.pid_qe.Out
+#define     plot13      pid_dclink.Out
+#define     plot14      dcLinkSoftRef
+#define     plot15      pllGrid.theta.sin_val
+#define     plot16      pllGrid.theta_0.sin_val
+#define     plot17      svgen_dq1.Ta
+#define     plot18      svgen_dq1.Tb
+#define     plot19      svgen_dq1.Tc
 
 void snapShot(N16 st_addr)
 {
@@ -435,55 +433,55 @@ switch(st_addr & 0xFF)
 			waveptr =  (float32_t *) &plot2;
 			break;
 		case 3:
-			waveptr =  &plot3;
+			waveptr =  (float32_t *) &plot3;
 			break;
 		case 4:
-			waveptr =  &plot4;
+			waveptr =  (float32_t *) &plot4;
 			break;
 		case 5:
-			waveptr =  &plot5;
+			waveptr =  (float32_t *) &plot5;
 			break;
 		case 6:
-			waveptr =  &plot6;
+			waveptr =  (float32_t *) &plot6;
 			break;
 		case 7:
-			waveptr =  &plot7;
+			waveptr =  (float32_t *) &plot7;
 			break;
 		case 8:
-			waveptr =  &plot8;
+			waveptr =  (float32_t *) &plot8;
 			break;
 		case 9:
-			waveptr =  &plot9;
+			waveptr =  (float32_t *) &plot9;
 			break;
 		case 10:
-			waveptr =  &plot10;
+			waveptr =  (float32_t *) &plot10;
 			break;
         case 11:
-            waveptr =  &plot11;
+            waveptr =  (float32_t *) &plot11;
             break;
         case 12:
-            waveptr =  &plot12;
+            waveptr =  (float32_t *) &plot12;
             break;
         case 13:
-            waveptr =  &plot13;
+            waveptr =  (float32_t *) &plot13;
             break;
         case 14:
-            waveptr =  &plot14;
+            waveptr =  (float32_t *) &plot14;
             break;
         case 15:
-            waveptr =  &plot15;
+            waveptr =  (float32_t *) &plot15;
             break;
         case 16:
-            waveptr =  &plot16;
+            waveptr =  (float32_t *) &plot16;
             break;
         case 17:
-            waveptr =  &plot17;
+            waveptr =  (float32_t *) &plot17;
             break;
         case 18:
-            waveptr =  &plot18;
+            waveptr =  (float32_t *) &plot18;
             break;
         case 19:
-            waveptr =  &plot19;
+            waveptr =  (float32_t *) &plot19;
             break;
 
 	}
@@ -709,13 +707,11 @@ void UpdateBits(void)
     UnitOnCommand_Bit       = UnitOnCommand ;
     AcceptReset_Bit         = AcceptReset   ;
     TestMode_Bit            = TestMode      ;
-    Master_Bit              = Master        ;
-    emShutdown_Bit          = EmergencyStop    ;
-    autoBypassFlag_Bit      = autoBypassFlag;
-    BypassAbscent_Bit       = BypassAbscent ;
-    UpdateEEPROM_Bit        = UpdateEEPROM  ;
-    PFSign_Bit              = PFSign        ;
     RevPolarity_Bit         = RevPolarity   ;
+    PFSign_Bit              = PFSign        ;
+    MainConAuxUsed_Bit      = MainConAuxUsed;
+    UpdateEEPROM_Bit        = UpdateEEPROM  ;
+    emShutdown_Bit          = EmergencyStop ;
 
     BitsUpdate(0, DigitalInputFlag1, DIParams);
 
