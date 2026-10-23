@@ -36,6 +36,11 @@
 #define    Temp1                       ArrayParamsF[12]  //,C,1
 #define    Temp2                       ArrayParamsF[13]  //,C,1
 #define    DcLinkRefActive             ArrayParamsF[14]  //,V,1
+#define    Vinv                        ArrayParamsF[15]  //,V,1
+#define    Vout                        ArrayParamsF[16]  //,V,1
+#define    Vbyp                        ArrayParamsF[17]  //,V,1
+#define    Iinv                        ArrayParamsF[18]  //,A,1
+#define    Iout                        ArrayParamsF[19]  //,A,1
 
 #define    kVA_Rph                     ArrayParamsF[20]  //,kVA,1
 #define    kVA_Yph                     ArrayParamsF[21]  //,kVA,1
@@ -69,11 +74,6 @@
 #define    DMinVal_mon                 ArrayParamsF[56]  //, ,1
 
 // 1-phase inverter / output / bypass / battery
-#define    Vinv                        ArrayParamsF[60]  //,V,1
-#define    Vout                        ArrayParamsF[61]  //,V,1
-#define    Vbyp                        ArrayParamsF[62]  //,V,1
-#define    Iinv                        ArrayParamsF[63]  //,A,1
-#define    Iout                        ArrayParamsF[64]  //,A,1
 #define    kW_Out                      ArrayParamsF[65]  //,kW,1
 #define    kVA_Out                     ArrayParamsF[66]  //,kVA,1
 #define    pf_Out                      ArrayParamsF[67]  //,,1

@@ -575,12 +575,13 @@ float32_t Average32(LPF32 *x, float32_t val)
     return(x->y);
 }
 
-#define UPDATE_KW_F(x,z)  z = (x.savedSum/rms_samplecount)*.001
+// single precision throughout (sqrtf, 'f' constants): no EABI double math
+#define UPDATE_KW_F(x,z)  z = (x.savedSum/rms_samplecount)*0.001f
 #define SCALEF(x,y,z)  z = x*y
-#define scaleKVA(v,i,k) k = v*i*.001
+#define scaleKVA(v,i,k) k = v*i*0.001f
 
 #define SCALE_RMSVAL_FLT(meter, sf,flt,v)   \
-        meter.RMS = sqrt(meter.savedSum/rms_samplecount)*sf; \
+        meter.RMS = sqrtf(meter.savedSum/rms_samplecount)*sf; \
         v = Average32(&flt, meter.RMS)
 
 void update_rmsmeters(void)
@@ -619,9 +620,9 @@ void update_rmsmeters(void)
         if (kVA_Yph<kW_Yph) kVA_Yph = kW_Yph;
         if (kVA_Bph<kW_Bph) kVA_Bph = kW_Bph;
 
-        powerfactorR = (kVA_Rph > 0.01) ? kW_Rph/ kVA_Rph : 0;
-        powerfactorY = (kVA_Yph > 0.01) ? kW_Yph/ kVA_Yph : 0;
-        powerfactorB = (kVA_Bph > 0.01) ? kW_Bph/ kVA_Bph : 0;
+        powerfactorR = (kVA_Rph > 0.01f) ? kW_Rph/ kVA_Rph : 0.0f;
+        powerfactorY = (kVA_Yph > 0.01f) ? kW_Yph/ kVA_Yph : 0.0f;
+        powerfactorB = (kVA_Bph > 0.01f) ? kW_Bph/ kVA_Bph : 0.0f;
 
         kVA_Total = kVA_Rph + kVA_Yph + kVA_Bph;
         kW_Total = kW_Rph + kW_Yph + kW_Bph;
@@ -667,27 +668,27 @@ void update_rmsmeters_inv(void)
     ctl.rms_update_flag2 = 0;
     if(n < MINPOINTS/2) return;
 
-    vinv_meter.RMS = sqrt(vinv_meter.savedSum/n)*VinvSF;
+    vinv_meter.RMS = sqrtf(vinv_meter.savedSum/n)*VinvSF;
     Vinv = Average32(&lpf32_vinv, vinv_meter.RMS);
-    vout_meter.RMS = sqrt(vout_meter.savedSum/n)*VoutSF;
+    vout_meter.RMS = sqrtf(vout_meter.savedSum/n)*VoutSF;
     Vout = Average32(&lpf32_vout, vout_meter.RMS);
-    vbyp_meter.RMS = sqrt(vbyp_meter.savedSum/n)*VbypSF;
+    vbyp_meter.RMS = sqrtf(vbyp_meter.savedSum/n)*VbypSF;
     Vbyp = Average32(&lpf32_vbyp, vbyp_meter.RMS);
-    iinv_meter.RMS = sqrt(iinv_meter.savedSum/n)*IinvSF;
+    iinv_meter.RMS = sqrtf(iinv_meter.savedSum/n)*IinvSF;
     Iinv = Average32(&lpf32_iinv, iinv_meter.RMS);
-    iout_meter.RMS = sqrt(iout_meter.savedSum/n)*IoutSF;
+    iout_meter.RMS = sqrtf(iout_meter.savedSum/n)*IoutSF;
     Iout = Average32(&lpf32_iout, iout_meter.RMS);
 
-    kW_Out = (kwo_meter.savedSum/n)*0.001;
-    if(kW_Out < 0) kW_Out = 0;
-    kVA_Out = Vout*Iout*0.001;
+    kW_Out = (kwo_meter.savedSum/n)*0.001f;
+    if(kW_Out < 0.0f) kW_Out = 0.0f;
+    kVA_Out = Vout*Iout*0.001f;
     if(kVA_Out < kW_Out) kVA_Out = kW_Out;
-    pf_Out = (kVA_Out > 0.01) ? kW_Out/kVA_Out : 0;
-    LoadPercent = (RatedCurrent > 0.1) ? Iout/RatedCurrent*100.0 : 0;
+    pf_Out = (kVA_Out > 0.01f) ? kW_Out/kVA_Out : 0.0f;
+    LoadPercent = (RatedCurrent > 0.1f) ? Iout/RatedCurrent*100.0f : 0.0f;
 
-    InvFrequency = OMEGA_FACTOR * omegaInv;
-    BypFrequency = OMEGA_FACTOR * lpf_omegaByp.y;
-    InvVrefActive = ctl.invVref * 0.70710678;
+    InvFrequency = (float32_t)OMEGA_FACTOR * omegaInv;
+    BypFrequency = (float32_t)OMEGA_FACTOR * lpf_omegaByp.y;
+    InvVrefActive = ctl.invVref * 0.70710678f;
     invModulation = ctl.invMod;
 }
 
