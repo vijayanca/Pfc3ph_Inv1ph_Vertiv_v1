@@ -275,7 +275,7 @@ void InverterStatus(void)
 {
     InvFlag.bit.INVDISABLE = !invPwmEnabled;
     InvFlag.bit.INVSOFTSTART = invSoftStart;
-    InvFlag.bit.MANUALBYP = ((DigitalInputFlag1 & DI_MANUALBYP) == 0);     // contact closed
+    InvFlag.bit.MANUALBYP = ((DigitalInputFlag1 & DI_MANUALBYP) != 0);     // as the 3-phase inverter (DI_NO_Flag inverts)
     InvFlag.bit.NOTSYNCED = !Synced;
     InvFlag.bit.INVVLOW = invPwmEnabled && !invSoftStart && chkVinv.stat.bit.LOW;
     if(chkVinv.stat.bit.HIGH) InvFlag.bit.INVVHIGH = TRUE;

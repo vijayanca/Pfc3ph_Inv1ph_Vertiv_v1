@@ -24,13 +24,13 @@ const PARAM *paramptr;
 const PARAM defaultValues[] = {
                                {50,900,680},  /*  DcLinkReference 100 (buck-boost mode) */
                                {1,10,3},  /*  PowerLimit 101 */
-                               {100,500,260},  /*  GridVoltageHL 102 (L-L) */
-                               {50,440,190},  /*  GridVoltageLL 103 (L-L) */
-                               {100,900,450},  /*  DCLinkHL 104 */
-                               {10,800,250},  /*  DCLinkLL 105 */
+                               {100,500,480},  /*  GridVoltageHL 102 (L-L) */
+                               {50,440,300},  /*  GridVoltageLL 103 (L-L) */
+                               {100,900,450},  /*  DCLinkHL 104 (no buck; ~800 with buck-boost) */
+                               {10,800,250},  /*  DCLinkLL 105 (no buck; ~350 with buck-boost) */
                                {1,500,100},  /*  IinpHL 106 */
                                {2,1000,200},  /*  OC_Level 107 */
-                               {100,1000,500},  /*  DCOV_Inst_Level 108 */
+                               {100,1000,500},  /*  DCOV_Inst_Level 108 (no buck; ~850 with buck-boost) */
                                {0.01,120,0.5},  /*  GridVoltageHL_delay 109 */
                                {0.01,120,0.5},  /*  GridVoltageLL_delay 110 */
                                {0.01,120,0.5},  /*  DCLinkHL_delay 111 */
@@ -74,7 +74,7 @@ const PARAM defaultValues[] = {
                                {-1.5,1.5,0},  /*  DtComp 146 (0 = off) */
                                {0.5,50,2},  /*  DtBand 147 (A) */
                                {1,1000,10},  /*  RatedKW 148 */
-                               {50,440,150},  /*  GridFailLevel 149 (L-L) */
+                               {50,440,250},  /*  GridFailLevel 149 (L-L) */
                                {100,260,230},  /*  RatedVoltage 150 */
                                {1,500,50},  /*  RatedCurrent 151 */
                                {100,300,260},  /*  InvVoltageHL 152 */
