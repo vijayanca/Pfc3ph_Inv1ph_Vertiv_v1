@@ -22,15 +22,15 @@ Uint16 crc_rxd=0,crc_act=0;
 const PARAM *paramptr;
 
 const PARAM defaultValues[] = {
-                               {50,900,720},  /*  DcLinkReference 100 */
+                               {50,900,680},  /*  DcLinkReference 100 (buck-boost mode) */
                                {1,10,3},  /*  PowerLimit 101 */
-                               {350,500,480},  /*  GridVoltageHL 102 */
-                               {50,440,300},  /*  GridVoltageLL 103 */
-                               {100,900,800},  /*  DCLinkHL 104 */
-                               {10,800,350},  /*  DCLinkLL 105 */
+                               {100,500,260},  /*  GridVoltageHL 102 (L-L) */
+                               {50,440,190},  /*  GridVoltageLL 103 (L-L) */
+                               {100,900,450},  /*  DCLinkHL 104 */
+                               {10,800,250},  /*  DCLinkLL 105 */
                                {1,500,100},  /*  IinpHL 106 */
                                {2,1000,200},  /*  OC_Level 107 */
-                               {100,1000,850},  /*  DCOV_Inst_Level 108 */
+                               {100,1000,500},  /*  DCOV_Inst_Level 108 */
                                {0.01,120,0.5},  /*  GridVoltageHL_delay 109 */
                                {0.01,120,0.5},  /*  GridVoltageLL_delay 110 */
                                {0.01,120,0.5},  /*  DCLinkHL_delay 111 */
@@ -73,18 +73,66 @@ const PARAM defaultValues[] = {
                                {0,4000,0},  /*  PR_Kh 145 (< 1 = off) */
                                {-1.5,1.5,0},  /*  DtComp 146 (0 = off) */
                                {0.5,50,2},  /*  DtBand 147 (A) */
-                               {1,1000,100},  /*  RatedKW 148 */
-                               {50,440,250},  /*  GridFailLevel 149 */
-                               {0,1,0},  /*  spare 150 */
-                               {0,1,0},  /*  spare 151 */
-                               {0,1,0},  /*  spare 152 */
-                               {0,1,0},  /*  spare 153 */
-                               {0,1,0},  /*  spare 154 */
-                               {0,1,0},  /*  spare 155 */
-                               {0,1,0},  /*  spare 156 */
-                               {0,1,0},  /*  spare 157 */
-                               {0,1,0},  /*  spare 158 */
-                               {0,1,0},  /*  spare 159 */
+                               {1,1000,10},  /*  RatedKW 148 */
+                               {50,440,150},  /*  GridFailLevel 149 (L-L) */
+                               {100,260,230},  /*  RatedVoltage 150 */
+                               {1,500,50},  /*  RatedCurrent 151 */
+                               {100,300,260},  /*  InvVoltageHL 152 */
+                               {50,250,200},  /*  InvVoltageLL 153 */
+                               {0.01,30,0.5},  /*  InvVoltHL_delay 154 */
+                               {0.01,30,2.0},  /*  InvVoltLL_delay 155 */
+                               {100,300,260},  /*  BypVoltageHL 156 */
+                               {50,250,190},  /*  BypVoltageLL 157 */
+                               {0.01,10,0.5},  /*  BypVoltHL_delay 158 */
+                               {0.01,10,0.5},  /*  BypVoltLL_delay 159 */
+
+                               {80,200,110},  /*  InvOverload 160 (%) */
+                               {0.1,600,30},  /*  InvOverload_delay 161 */
+                               {2,1000,150},  /*  InvOC_Level 162 (A peak) */
+                               {100,800,300},  /*  InvDCLinkMin 163 */
+                               {10,5000,1200},  /*  VinvSF 164 */
+                               {10,5000,1200},  /*  VoutSF 165 */
+                               {10,5000,1200},  /*  VbypSF 166 */
+                               {10,5000,1200},  /*  IinvSF 167 */
+                               {10,5000,1200},  /*  IoutSF 168 */
+                               {0,5,0.5},  /*  inv_kp 169 */
+                               {0,5000,100},  /*  inv_kr 170 */
+                               {0,5000,0},  /*  inv_kh 171 (< 1 = off) */
+                               {0,20,0},  /*  inv_kci 172 (V/A, 0 = off) */
+                               {6,24,10},  /*  FswInv 173 (kHz) */
+                               {0.001,0.2,0.02},  /*  LockingLevel 174 */
+
+                               {100,800,400},  /*  VbatFloat 175 */
+                               {0.5,200,10},  /*  IbatRef 176 */
+                               {250,400,320},  /*  DcLinkMinNoBuck 177 */
+                               {300,450,400},  /*  DcLinkMaxNoBuck 178 */
+                               {100,800,450},  /*  VbatHL 179 */
+                               {100,800,320},  /*  VbatLL 180 */
+                               {0.1,60,1},  /*  VbatHL_delay 181 */
+                               {0.1,60,1},  /*  VbatLL_delay 182 */
+                               {300,850,650},  /*  DcLinkBoostRef 183 */
+                               {0.1,0.9,0.6},  /*  BoostDmax 184 */
+                               {0.0001,1,0.01},  /*  vbat_kp 185 */
+                               {0.00001,0.1,0.0005},  /*  vbat_ki 186 */
+                               {0.0001,1,0.01},  /*  ibat_kp 187 */
+                               {0.00001,0.1,0.0005},  /*  ibat_ki 188 */
+                               {1,500,50},  /*  IbatOC_Level 189 (A peak) */
+
+                               {0.0001,1,0.005},  /*  boost_kp 190 */
+                               {0.00001,0.1,0.0002},  /*  boost_ki 191 */
+                               {0,20,1},  /*  nobuck_kp 192 (V/A) */
+                               {0,1,0.01},  /*  nobuck_ki 193 */
+                               {6,40,10},  /*  FswBB 194 (kHz) */
+                               {0.5,100,10},  /*  RatedKVA 195 */
+                               {0,1,0},  /*  spare 196 */
+                               {0,1,0},  /*  spare 197 */
+                               {0,1,0},  /*  spare 198 */
+                               {0,1,0},  /*  spare 199 */
+                               {0,1,0},  /*  spare 200 */
+                               {0,1,0},  /*  spare 201 */
+                               {0,1,0},  /*  spare 202 */
+                               {0,1,0},  /*  spare 203 */
+                               {0,1,0},  /*  spare 204 */
     };
 
 
@@ -282,6 +330,9 @@ void RestoreSettings(void)
         spiU |= RestoreParams(15);
         spiU |= RestoreParams(30);
         spiU |= RestoreParams(45);
+        spiU |= RestoreParams(60);
+        spiU |= RestoreParams(75);
+        spiU |= RestoreParams(90);
 
         if (spiU)
         {
@@ -304,6 +355,9 @@ void storeArrayToEEPROM(void) {
     StoreParams(15);
     StoreParams(30);
     StoreParams(45);
+    StoreParams(60);
+    StoreParams(75);
+    StoreParams(90);
 }
 
 

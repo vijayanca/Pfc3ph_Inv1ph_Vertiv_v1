@@ -8,10 +8,11 @@
  *  MCU   : TMS320F28P550SG9PZR (100-pin PZ)
  *  Pin numbers / signal names follow board_pin_map.h.
  *
- *  3-phase PFC use of the common board:
+ *  3-phase PFC + 1-phase inverter use of the common board:
  *   - ePWM1..3 A/B (GPIO0..5)  : PFC bridge 1 (U30 -> CON15)
- *   - ePWM4..6 A/B (GPIO6..11) : bridge 2 (CON19), not used, held off
- *   - GPIO12/13 (STAT_INV/BYP) : not used, plain outputs held low
+ *   - ePWM4/5 A/B (GPIO6..9)   : 1-phase inverter full bridge (CON19)
+ *   - ePWM6 A/B (GPIO10/11)    : battery buck (A) / boost (B)
+ *   - ePWM7 A/B (GPIO12/13)    : static switch STAT_INV / STAT_BYP pulse trains
  *   - ePWM8 module             : ADC trigger timebase only (AdcTriggerInit, pwm.c)
  *   - RLY11 (GPIO61) precharge, RLY12 (GPIO59) main contactor (onboard),
  *     RLY3 PFC OK, RLY4 common fault
@@ -130,7 +131,7 @@ void GpioInit(void)
     // STAT_USE_EPWM7 = 1: gate pulse trains from EPWM7A/B (inverter).
     // 0: plain GPIO outputs.
 #ifndef STAT_USE_EPWM7
-#define STAT_USE_EPWM7  0       // PFC: no static switch, outputs held low
+#define STAT_USE_EPWM7  1       // static switch gate pulse trains from EPWM7 (pwm.c)
 #endif
     GpioCtrlRegs.GPAPUD.bit.GPIO12      = 1;    // STAT_INV  pin 51
     GpioCtrlRegs.GPAPUD.bit.GPIO13      = 1;    // STAT_BYP  pin 50

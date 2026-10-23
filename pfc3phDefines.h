@@ -53,7 +53,7 @@ typedef signed char S8;
 #define DINP1       GPIO_ReadPin(247U)      // DI_1  pin 42  Unit ON
 #define DINP2       GPIO_ReadPin(20U)       // DI_2  pin 48  Reset
 #define DINP3       GPIO_ReadPin(21U)       // DI_3  pin 49  Main contactor aux
-#define DINP4       GPIO_ReadPin(63U)       // DI_4  pin 47  spare
+#define DINP4       GPIO_ReadPin(63U)       // DI_4  pin 47  Manual bypass
 #define DINP5       GPIO_ReadPin(48U)       // DI_5  pin 7   spare
 #define DINP6       GPIO_ReadPin(49U)       // DI_6  pin 8   spare
 #define DINP7       GPIO_ReadPin(50U)       // DI_7  pin 9   Heatsink temp
@@ -67,6 +67,7 @@ typedef signed char S8;
 #define DI_MAINCONAUX       0x0004
 #define DI_HSTEMP           0x0040
 #define DI_EPO              0x0080
+#define DI_MANUALBYP        0x0008
 
 // Relay outputs (RelayFlag bits), board_pin_map.h RLYx_GPIO
 #define DO_PRECHARGE        0x0001      // RLY11 (GPIO61, onboard) precharge contactor
@@ -198,16 +199,79 @@ typedef signed char S8;
                         pulseON = 1;                   \
                         __asm(" EDIS")
 
-// Bridge 2 (EPWM4-6, CON19) is not used by the PFC: held off permanently,
-// by a one-shot trip (TZ force low) and a continuous software force low on A and B
-#define BRIDGE2_OFF()   EPwm4Regs.AQSFRC.bit.RLDCSF = 3; EPwm4Regs.AQCSFRC.all = 0x5; \
-                        EPwm5Regs.AQSFRC.bit.RLDCSF = 3; EPwm5Regs.AQCSFRC.all = 0x5; \
-                        EPwm6Regs.AQSFRC.bit.RLDCSF = 3; EPwm6Regs.AQCSFRC.all = 0x5; \
-                        __asm(" EALLOW");  \
+// Bridge 2, EPWM4/5 (PWM7-10) = 1-phase inverter full bridge, on/off through
+// the one-shot trip; ENABLE also clears a latched desaturation trip (VCESAT2)
+#define DISABLE_INVPWM()   __asm(" EALLOW");  \
                         EPwm4Regs.TZFRC.bit.OST = 0x1; \
                         EPwm5Regs.TZFRC.bit.OST = 0x1; \
-                        EPwm6Regs.TZFRC.bit.OST = 0x1; \
+                        invPulseON = 0;                \
                         __asm(" EDIS")
+#define ENABLE_INVPWM()    __asm(" EALLOW");  \
+                        EPwm4Regs.TZCLR.bit.DCAEVT1 = 0x1; \
+                        EPwm5Regs.TZCLR.bit.DCAEVT1 = 0x1; \
+                        EPwm4Regs.TZCLR.bit.OST = 0x1; \
+                        EPwm5Regs.TZCLR.bit.OST = 0x1; \
+                        invPulseON = 1;                \
+                        __asm(" EDIS")
+
+// Bridge 2, EPWM6 (PWM11 = buck, PWM12 = boost) = battery buck-boost
+#define DISABLE_BBPWM()    __asm(" EALLOW");  \
+                        EPwm6Regs.TZFRC.bit.OST = 0x1; \
+                        bbPulseON = 0;                 \
+                        __asm(" EDIS")
+#define ENABLE_BBPWM()     __asm(" EALLOW");  \
+                        EPwm6Regs.TZCLR.bit.DCAEVT1 = 0x1; \
+                        EPwm6Regs.TZCLR.bit.OST = 0x1; \
+                        bbPulseON = 1;                 \
+                        __asm(" EDIS")
+
+// 1-phase inverter carrier (EPWM4/5), up-down at 150 MHz: TBPRD = 75000 / fsw[kHz]
+#define UPDATE_INV_FSW() \
+    if((FswInv<6) || (FswInv>24)) FswInv = 10; \
+    InvPwmPeriod = (N16) (75000.0/FswInv); \
+    ctl.invPeriod = InvPwmPeriod; \
+    EPwm4Regs.TBPRD = InvPwmPeriod; \
+    EPwm5Regs.TBPRD = InvPwmPeriod
+
+// buck-boost carrier (EPWM6)
+#define UPDATE_BB_FSW() \
+    if((FswBB<6) || (FswBB>40)) FswBB = 10; \
+    BBPwmPeriod = (N16) (75000.0/FswBB); \
+    ctl.bbPeriod = BBPwmPeriod; \
+    EPwm6Regs.TBPRD = BBPwmPeriod
+
+// Static switch gate pulse trains on EPWM7 (StaticSwitchDrivesInit, pwm.c):
+//   EPWM7A -> STAT_INV (GPIO12, PWM13), EPWM7B -> STAT_BYP (GPIO13, PWM14), U33 -> CON24
+#define STATIC_DRIVES_OFF()    \
+        EPwm7Regs.AQCTLA.bit.CAD = AQ_CLEAR;    \
+        EPwm7Regs.AQCTLB.bit.CBD = AQ_CLEAR
+
+#define EnableInvSS()   EPwm7Regs.AQCTLA.bit.CAD = AQ_SET
+#define DisableInvSS()  EPwm7Regs.AQCTLA.bit.CAD = AQ_CLEAR
+#define EnableBypSS()   EPwm7Regs.AQCTLB.bit.CBD = AQ_SET
+#define DisableBypSS()  EPwm7Regs.AQCTLB.bit.CBD = AQ_CLEAR
+
+#define INV_RESET_FAULTS()  \
+              chkVinv.stat.bit.HIGH = FALSE;      \
+              chkIout.stat.bit.HIGH = FALSE;      \
+              InvFlag.bit.INVTRIPFAULT = FALSE;   \
+              InvFlag.bit.INVLATCH = FALSE;       \
+              InvFlag.bit.INVOCTRIP = FALSE;      \
+              InvFlag.bit.OVERLOAD = FALSE;       \
+              InvFlag.bit.INVVHIGH = FALSE;       \
+              BattFlag.bit.BBOCTRIP = FALSE;      \
+              BattFlag.bit.BBVCESAT = FALSE;      \
+              InvTripCount = 0
+
+#define INV_AUTO_RESET_FAULTS()  \
+              chkVinv.stat.bit.HIGH = FALSE;      \
+              chkIout.stat.bit.HIGH = FALSE;      \
+              InvFlag.bit.INVTRIPFAULT = FALSE;   \
+              InvFlag.bit.INVOCTRIP = FALSE;      \
+              InvFlag.bit.OVERLOAD = FALSE;       \
+              InvFlag.bit.INVVHIGH = FALSE;       \
+              BattFlag.bit.BBOCTRIP = FALSE;      \
+              BattFlag.bit.BBVCESAT = FALSE
 
 #define Nop()   __asm(" NOP")
 
@@ -239,8 +303,8 @@ typedef signed char S8;
 
 // EEPROM layout IDs. Not the inverter's 0x4943 / 0x4944 or the rectifier's: a
 // board that held other firmware must load PFC defaults, not foreign values.
-#define     MAGIC           0x5046  // "PF" PFC float params
-#define     MAGIC1          0x5047  // "PG" PFC int params
+#define     MAGIC           0x5048  // "PH" PFC + 1ph inverter float params
+#define     MAGIC1          0x5049  // "PI" PFC + 1ph inverter int params
 #define     NPARAMS         200
 #define     CANRXID         0x200
 
@@ -470,6 +534,49 @@ typedef union {
     struct STAT_BITS bit;
 } STATMODE;
 
+// AlarmFlag6 (STAT6), 1-phase inverter / static switch
+struct INV_BITS {
+    Uint16 INVDISABLE :1;    // 0
+    Uint16 INVSOFTSTART :1;  // 1
+    Uint16 LOADONINV :1;     // 2
+    Uint16 LOADONBYP :1;     // 3
+    Uint16 MANUALBYP :1;     // 4
+    Uint16 NOTSYNCED :1;     // 5
+    Uint16 INVVLOW :1;       // 6
+    Uint16 INVVHIGH :1;      // 7
+    Uint16 OVERLOAD :1;      // 8
+    Uint16 INVOCTRIP :1;     // 9
+    Uint16 BYPASSOK :1;      // 10
+    Uint16 INVOK :1;         // 11
+    Uint16 DCLOWINV :1;      // 12
+    Uint16 INVTRIPFAULT :1;  // 13
+    Uint16 INVLATCH :1;      // 14
+    Uint16 BITSVALID :1;     // 15
+};
+typedef union {
+    N16 all;
+    struct INV_BITS bit;
+} INVMODE;
+
+// AlarmFlag7 (STAT7), battery / buck-boost
+struct BATT_BITS {
+    Uint16 BUCKFITTED :1;    // 0
+    Uint16 CHARGING :1;      // 1
+    Uint16 DISCHARGING :1;   // 2
+    Uint16 CURRENTLIMIT :1;  // 3
+    Uint16 VBATLOW :1;       // 4
+    Uint16 VBATHIGH :1;      // 5
+    Uint16 BBOCTRIP :1;      // 6
+    Uint16 BBVCESAT :1;      // 7
+    Uint16 BATTEOD :1;       // 8
+    Uint16 NU :6;            // 9-14
+    Uint16 BITSVALID :1;     // 15
+};
+typedef union {
+    N16 all;
+    struct BATT_BITS bit;
+} BATTMODE;
+
 struct COMMOK_BITS {             // bits  description
     Uint16 CAN_DISP :1;  // 0
     Uint16 NZ1 :2;       // 1-2
@@ -511,12 +618,12 @@ typedef struct eventPacket {
 	N16	eTemp1;
 	N16	eTemp2;
 	N16	eReason;
-	N16	notUsed00;
-	N16	notUsed01;
-	N16	notUsed02;
-	N16	notUsed03;
-	N16	notUsed04;
-	N16	notUsed05;
+	N16	eVinv;
+	N16	eVout;
+	N16	eIout;
+	N16	eVbyp;
+	N16	eInvFreq;
+	N16	alarm7;
 } eventPacket;
 
 
@@ -560,6 +667,7 @@ void        EraseEventLog(void);
 void		snapShot(N16 st_addr);
 void		initRmsMeter(rms_meter *r);
 void		update_rmsmeters(void);
+void		update_rmsmeters_inv(void);
 void		updateStatus(void);
 
 void		RestoreSettings(void);
@@ -602,4 +710,15 @@ void    WriteRecordPointer(void);
 void    MCANBusProcessing(void);
 N16     MCANBusOff(void);
 void    PR_Reset(void);
+void    InverterApplication(void);
+void    InverterStatus(void);
+void    StaticSwitchControl(void);
+void    InverterSync(void);
+void    InverterTimer1ms(void);
+void    BatteryControl(void);
+void    BatteryStatus(void);
+void    ePWMInit_Inv1ph(N16 chA, N16 chB);
+void    ePWMInit_BuckBoost(N16 ch);
+void    StaticSwitchDrivesInit(void);
+void    DesatTripInit2(void);
 #endif	//__PFC3PHDEFINES_H__

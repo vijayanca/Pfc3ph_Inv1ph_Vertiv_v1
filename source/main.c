@@ -9,15 +9,18 @@
  Description	: This is the main file for the Texas Instruments' TMS320F28P550 DSP
  controller. This  file  contains  the  scheduler and functions for
  interfacing	to the peripheral cards.
- 3-phase PFC (active front end) on the Common Controller v2, control as in the
- RBC (RBC2_KDSENG_v4): DC-link PI -> Id reference, dq PI / alpha-beta PR
- current control on the CLA (controlCore.h).
+ 3-phase PFC (active front end) + 1-phase 230 V inverter with static switch,
+ optional battery buck-boost, on the Common Controller v2. PFC control as in
+ the RBC (RBC2_KDSENG_v4): DC-link PI -> Id reference, dq PI / alpha-beta PR
+ current control; inverter PR voltage loop; all on the CLA (controlCore.h).
+ Inverter / static switch: inverter.c, battery: battery.c.
  Date Created  	: 01 Aug 2023
  Authors		: Vijayan C A
  History Log	: Following Changes Carried out by Vijayan C A
  ----------------------------------------------------------------------------------\
  | Date	      | Ver	   | 			Description of Modification		 	 | Bug Nbr |
  |------------|--------|-------------------------------------------------|---------|
+ | 23/10/2026 | 02AA   | + 1-phase inverter, static switch, buck-boost   |         |
  | 23/10/2026 | 01AA   | 3-phase PFC from the 3-phase inverter           |         |
  |            |        | (RBC control, sequencing and protections)       |         |
  | 20/06/2024 | 00AB   | Paralleling with output current                 |         |
@@ -92,11 +95,14 @@ extern const PARAM defaultValues[];
     DISABLE_PFCPWM();
     DesatTripInit();        // VCESAT1 (active high) -> one-shot trip of EPWM1-3
 
-    // Bridge 2 (EPWM4-6, U33 -> CON19): not used, outputs held low
-    InitDrives(4);
-    InitDrives(5);
-    InitDrives(6);
-    BRIDGE2_OFF();
+    // Bridge 2 (U33 -> CON19): EPWM4/5 1-phase inverter, EPWM6 battery buck-boost,
+    // all tripped (off) until enabled
+    ePWMInit_Inv1ph(4, 5);
+    ePWMInit_BuckBoost(6);
+    DesatTripInit2();       // VCESAT2 (active high) -> one-shot trip of EPWM4-6
+
+    StaticSwitchDrivesInit();   // EPWM7A STAT_INV / EPWM7B STAT_BYP gate pulse trains, off
+    STATIC_DRIVES_OFF();
 
     AdcTriggerInit();           // EPWM8 SOCA, 20 kHz ADC trigger
 
@@ -222,12 +228,17 @@ EDIS;
     MCAN_enableIntrLine(MCANA_DRIVER_BASE, MCAN_INTR_LINE_NUM_1, 1U);
 	SystemFlag.bit.POWERINGUP = TRUE;
 	UPDATE_PFC_FSW();
+	UPDATE_INV_FSW();
+	UPDATE_BB_FSW();
 	OffsetNotDone = TRUE;
 
 	while (1)
 	{
 	    PfcApplication();
+	    InverterApplication();
 		updateStatus();
+		InverterStatus();
+		BatteryStatus();
 
 		ModbusProcessing();
 		ModbusProcessing1();
@@ -236,6 +247,10 @@ EDIS;
         if (rms_update_flag)
             {
                 update_rmsmeters();
+            }
+        if (ctl.rms_update_flag2)
+            {
+                update_rmsmeters_inv();
             }
 
 		if (seconds!= seconds_old)
@@ -381,6 +396,8 @@ void updateStatus(void)
     if(trips & TRIP_OC_B) ACLimitFlag.bit.OC_INSTTRIP_B = TRUE;
     if(trips & (TRIP_OC_R | TRIP_OC_Y | TRIP_OC_B)) SystemFlag.bit.OCTRIP = TRUE;
     if(trips & TRIP_DCOV) { DCLimitFlag.bit.DCOV_TRIP = TRUE; SystemFlag.bit.DCOVTRIP = TRUE; }
+    if(trips & TRIP_INV_OC) InvFlag.bit.INVOCTRIP = TRUE;       // InverterStatus() trips
+    if(trips & TRIP_BB_OC) BattFlag.bit.BBOCTRIP = TRUE;        // BatteryControl() stops
 
     //------------------------------------------------ digital inputs
      tempiFlag = DigitalInputFlag1;
@@ -416,6 +433,7 @@ void updateStatus(void)
      if((DigitalInputFlag1 & DI_RESET)==0)
              {
                  RESET_FAULTS();
+                 INV_RESET_FAULTS();
              }
 
      // main contactor closed: aux contact (DI3 closed) or 0.5 s after the command
@@ -641,12 +659,46 @@ void update_rmsmeters(void)
     DMinVal_mon = DMinVal;
 }
 
+// inverter / output / bypass meters, saved by the control at each inverter zero cross
+void update_rmsmeters_inv(void)
+{
+    N16 n = ctl.rms_samplecount2;
+
+    ctl.rms_update_flag2 = 0;
+    if(n < MINPOINTS/2) return;
+
+    vinv_meter.RMS = sqrt(vinv_meter.savedSum/n)*VinvSF;
+    Vinv = Average32(&lpf32_vinv, vinv_meter.RMS);
+    vout_meter.RMS = sqrt(vout_meter.savedSum/n)*VoutSF;
+    Vout = Average32(&lpf32_vout, vout_meter.RMS);
+    vbyp_meter.RMS = sqrt(vbyp_meter.savedSum/n)*VbypSF;
+    Vbyp = Average32(&lpf32_vbyp, vbyp_meter.RMS);
+    iinv_meter.RMS = sqrt(iinv_meter.savedSum/n)*IinvSF;
+    Iinv = Average32(&lpf32_iinv, iinv_meter.RMS);
+    iout_meter.RMS = sqrt(iout_meter.savedSum/n)*IoutSF;
+    Iout = Average32(&lpf32_iout, iout_meter.RMS);
+
+    kW_Out = (kwo_meter.savedSum/n)*0.001;
+    if(kW_Out < 0) kW_Out = 0;
+    kVA_Out = Vout*Iout*0.001;
+    if(kVA_Out < kW_Out) kVA_Out = kW_Out;
+    pf_Out = (kVA_Out > 0.01) ? kW_Out/kVA_Out : 0;
+    LoadPercent = (RatedCurrent > 0.1) ? Iout/RatedCurrent*100.0 : 0;
+
+    InvFrequency = OMEGA_FACTOR * omegaInv;
+    BypFrequency = OMEGA_FACTOR * lpf_omegaByp.y;
+    InvVrefActive = ctl.invVref * 0.70710678;
+    invModulation = ctl.invMod;
+}
+
 
 N16 BITS[] = {BIT0, BIT1, BIT2, BIT3, BIT4, BIT5, BIT6, BIT7, BIT8, BIT9, BIT10, BIT11, BIT12, BIT13, BIT14, BIT15};
 
 #define CALARM_FLAG1    0x7FC0      // grid fail .. latched fault, wrong sequence excluded
 #define CALARM_FLAG2    0x3FFF
 #define CALARM_FLAG3    0x000B
+#define CALARM_FLAG6    0x63C0      // inverter: V low / high, overload, OC, trip, latched
+#define CALARM_FLAG7    0x01C0      // battery: OC, bridge 2 VCESAT, end of discharge
 
 N16 Fault_Bits(void)
     {
@@ -676,7 +728,8 @@ void    UpdateRelayFlag(void)
         if(pwmEnabled && !pfcSoftStart && !SystemFlag.bit.TRIPFAULT) RelayFlag |= DO_PFCOK;
         else RelayFlag &= (~DO_PFCOK);
 
-        if((AlarmFlag1 & (CALARM_FLAG1 | 0x0020)) || (AlarmFlag2 & CALARM_FLAG2) || (AlarmFlag3 & CALARM_FLAG3))
+        if((AlarmFlag1 & (CALARM_FLAG1 | 0x0020)) || (AlarmFlag2 & CALARM_FLAG2) || (AlarmFlag3 & CALARM_FLAG3) ||
+           (AlarmFlag6 & CALARM_FLAG6) || (AlarmFlag7 & CALARM_FLAG7))
             { RelayFlag |= DO_COMMONFAULT; BuzzerOn = TRUE; }
         else { RelayFlag &= (~DO_COMMONFAULT);  BuzzerOn = FALSE; }
 
@@ -744,6 +797,14 @@ void    UpdateRelayFlag(void)
         case 142:       // switching frequency: applied while the PFC is off
             if(pwmEnabled==0) { UPDATE_PFC_FSW(); }
             break;
+
+        case 173:       // inverter switching frequency, while the inverter is off
+            if(invPwmEnabled==0) { UPDATE_INV_FSW(); }
+            break;
+
+        case 194:       // buck-boost switching frequency, while it is off
+            if(bbPulseON==0) { UPDATE_BB_FSW(); }
+            break;
         }
 
         return;
@@ -787,6 +848,8 @@ void    UpdateRelayFlag(void)
 #define MSGMASK3 0x000B // DCLimitFlag: low, high, inst. OV
 #define MSGMASK4 0x00C1 // DI: Unit ON, heatsink temp, EPO
 #define MSGMASK5 0x0001 // StatFlag: PFC enabled
+#define MSGMASK6 0x73FD // InvFlag: all but ramping, bypass OK, inverter OK
+#define MSGMASK7 0x01F6 // BattFlag: charging .. end of discharge
 
 
  Event = 0;
@@ -822,6 +885,18 @@ void    UpdateRelayFlag(void)
          if (j) Event = 1;
          AlarmFlag5_old = ev;
 
+         AlarmFlag = AlarmFlag6;
+         ev = AlarmFlag & MSGMASK6;
+         j = ev & (~AlarmFlag6_old);
+         if (j) Event = 1;
+         AlarmFlag6_old = ev;
+
+         AlarmFlag = AlarmFlag7;
+         ev = AlarmFlag & MSGMASK7;
+         j = ev & (~AlarmFlag7_old);
+         if (j) Event = 1;
+         AlarmFlag7_old = ev;
+
          if (Event && (eventCount < 3))
          {
              Events[eventCount].type = 0x1974;
@@ -833,7 +908,13 @@ void    UpdateRelayFlag(void)
              Events[eventCount].alarm3 = AlarmFlag3 & MSGMASK3;
              Events[eventCount].alarm4 = AlarmFlag4 & MSGMASK4;
              Events[eventCount].alarm5 = AlarmFlag5 & MSGMASK5;
-             Events[eventCount].alarm6 = 0;
+             Events[eventCount].alarm6 = AlarmFlag6 & MSGMASK6;
+             Events[eventCount].alarm7 = AlarmFlag7 & MSGMASK7;
+                Events[eventCount].eVinv = (int) (Vinv*10);
+                Events[eventCount].eVout = (int) (Vout*10);
+                Events[eventCount].eIout = (int) (Iout*10);
+                Events[eventCount].eVbyp = (int) (Vbyp*10);
+                Events[eventCount].eInvFreq = (int) (InvFrequency*100);
 
                 Events[eventCount].eVinpRY = (int) (VinpRY*10);
                 Events[eventCount].eVinpYB = (int) (VinpYB*10);

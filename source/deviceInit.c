@@ -21,7 +21,7 @@ Date	| Modified |  		Description of Modification 		| Bug Number |
 #include "../include/device.h"
 #include "SVGEN_CLA.h"
 
-#define	CARD_ID			2001        // RBC / PFC family (RBC2_KDSENG_v4)
+#define	CARD_ID			2002        // PFC + 1-phase inverter (RBC / PFC family)
 #define	SWVERSION_SET	100
 
 void    InitHiLoParams(void)
@@ -38,6 +38,12 @@ void    InitHiLoParams(void)
      InitHiLo(&chkIb, &IinpB, &IinpHL, &LowValue, &IinpHL_delay, &LowDelay);
 
      InitHiLo(&chkdcLink, &DcLinkVoltage, &DCLinkHL, &DCLinkLL, &DCLinkHL_delay, &DCLinkLL_delay);
+
+     // 1-phase inverter, bypass, battery
+     InitHiLo(&chkVinv, &Vinv, &InvVoltageHL, &InvVoltageLL, &InvVoltHL_delay, &InvVoltLL_delay);
+     InitHiLo(&chkVbyp, &Vbyp, &BypVoltageHL, &BypVoltageLL, &BypVoltHL_delay, &BypVoltLL_delay);
+     InitHiLo(&chkIout, &Iout, &InvOverloadA, &LowValue, &InvOverload_delay, &LowDelay);
+     InitHiLo(&chkVbat, &Vbat, &VbatHL, &VbatLL, &VbatHL_delay, &VbatLL_delay);
  }
 
 
@@ -130,6 +136,32 @@ void    InitHiLoParams(void)
      initRmsMeter(&kw_meter_R);
      initRmsMeter(&kw_meter_Y);
      initRmsMeter(&kw_meter_B);
+
+     // 1-phase inverter, bypass
+     setLowPassFilter(&lpf_vinv, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_vout, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_vbyp, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_iinv, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_iout, (10000.0*SAMPLING_TIME), (0.0));
+     setLowPassFilter(&lpf_omegaByp, (100.0*SAMPLING_TIME), (OMEGADEFAULT));
+     initRmsMeter(&vinv_meter);
+     initRmsMeter(&vout_meter);
+     initRmsMeter(&vbyp_meter);
+     initRmsMeter(&iinv_meter);
+     initRmsMeter(&iout_meter);
+     initRmsMeter(&kwo_meter);
+     PR_RES_CLEAR(prV1); PR_RES_CLEAR(prV3);
+     PR_RES_CLEAR(prV5); PR_RES_CLEAR(prV7);
+     InitPLL(&pllByp);
+     omegaInv = OMEGADEFAULT;
+     angleInv = 0.0;
+     theta_inv.sin_val = 0.0;
+     theta_inv.cos_val = 1.0;
+
+     // battery buck-boost (gains from the parameters in BatteryControl)
+     SetPfcPI(&pid_vbat, 0.01, 0.0005, 0.95, 0.0);
+     SetPfcPI(&pid_ibat, 0.01, 0.0005, 0.95, 0.0);
+     SetPfcPI(&pid_boost, 0.005, 0.0002, 0.6, 0.0);
 
      theta.sin_val = 0.0;
      theta.cos_val = 1.0;

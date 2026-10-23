@@ -16,7 +16,7 @@
 #define rbuf    spiReadBuffer
 #define wbuf    spiWriteBuffer
 //                     12345678901234567890
-char *defaultSerial = "VERTIV/PFC3PH/0001";
+char *defaultSerial = "VERTIV/PFCINV1/0001";
 
 Uint16 crc_rxd1=0,crc_act1=0;
 
@@ -48,16 +48,16 @@ const PARAM_INT defaultValuesInt[] = {
                                       {0,1,0},  /*  spare 121 */
                                       {0,1023,0},  /*  DI_NO_Flag 122 */
                                       {0,1,0},  /*  UpdateEEPROM 123 */
-                                      {0,1,0},  /*  spare 124 */
-                                      {0,1,0},  /*  spare 125 */
-                                      {0,1,0},  /*  spare 126 */
-                                      {0,1,0},  /*  spare 127 */
-                                      {0,1,0},  /*  spare 128 */
-                                      {0,1,0},  /*  spare 129 */
+                                      {0,1,0},  /*  BuckBoostEnable 124 */
+                                      {0,1,1},  /*  InvEnable 125 */
+                                      {0,1,0},  /*  IbatPolarity 126 */
+                                      {0,1,0},  /*  InvRevPolarity 127 */
+                                      {0,7,0},  /*  pr_hMaskInv 128 (b0 3rd b1 5th b2 7th) */
+                                      {1,10,3},  /*  InvMaxRestart 129 */
 
-                                      {0,1000,0},  /*   130 */
-                                      {0,1000,0},  /*   131 */
-                                      {0,1000,0},  /*   132 */
+                                      {0,60,5},  /*  xfrToInverterDelay 130 (s) */
+                                      {1,200,10},  /*  InvOC_Delay 131 (samples) */
+                                      {1,200,10},  /*  BBOC_Delay 132 (samples) */
                                       {0,1000,0},  /*   133 */
                                       {0,1000,0},  /*   134 */
                                       {0,1000,0},  /*   135 */
@@ -317,6 +317,7 @@ N16 UpdateOneInt(N16 adr, int val) {
         else
         {
             RESET_FAULTS();
+            INV_RESET_FAULTS();
         }
         return 0;
     }

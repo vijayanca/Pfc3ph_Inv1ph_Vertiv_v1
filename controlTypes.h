@@ -110,6 +110,15 @@ typedef struct {
 
 #define PR_RES_CLEAR(r)     r.v1 = 0.0f; r.v2 = 0.0f
 
+// Same resonator with its own state limit (inverter voltage loop, states in volts)
+#define PR_RES_MACRO_L(r,e,kr,w,damp2,lim)                                              \
+    r.v1 += (float32_t)SAMPLING_TIME * ((kr)*(e) - (w)*r.v2 - (damp2)*r.v1);            \
+    if(r.v1 >  (lim)) r.v1 =  (lim);                                                    \
+    if(r.v1 < -(lim)) r.v1 = -(lim);                                                    \
+    r.v2 += (float32_t)SAMPLING_TIME * ((w)*r.v1);                                      \
+    if(r.v2 >  (lim)) r.v2 =  (lim);                                                    \
+    if(r.v2 < -(lim)) r.v2 = -(lim)
+
 // PFC current controller: dq feedback filters and PI regulators
 typedef struct
 {

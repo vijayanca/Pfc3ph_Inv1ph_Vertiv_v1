@@ -52,6 +52,7 @@ static inline void cpuPostControl(void)
     }
 
     pll_and_sincos();
+    InverterSync();         // bypass PLL, inverter angle (inverter.c)
 
     if((pllGrid.theta.sin_val >= 0.0) && (prevSin < 0.0))
     {
@@ -260,6 +261,12 @@ __interrupt void cpu_timer1_isr(void)
 
 	        }
 
+	        // 1-phase inverter / static switch (inverter.c), battery (battery.c);
+	        // after the seconds block: milliseconds == 0 once a second
+	        InverterTimer1ms();
+	        CheckHiLo(&chkVbat);
+	        BatteryControl();
+
 	        // SYSLED (GPIO62, LED5): 5 Hz when running, 1 Hz when stopped
 	        if(pwmEnabled)
 	        {
@@ -293,9 +300,11 @@ __interrupt void cpu_timer1_isr(void)
             }
             else
             {
-                // reference lowered while running: follow it down at the same rate
-                if(dcLinkSoftRef > dcLinkReference) dcLinkSoftRef -= ref_inc;
-                if(dcLinkSoftRef < dcLinkReference) dcLinkSoftRef = dcLinkReference;
+                // reference changed while running (battery current limit,
+                // battery.c): follow it at the same rate, both directions
+                if(dcLinkSoftRef > dcLinkReference + ref_inc) dcLinkSoftRef -= ref_inc;
+                else if(dcLinkSoftRef < dcLinkReference - ref_inc) dcLinkSoftRef += ref_inc;
+                else dcLinkSoftRef = dcLinkReference;
             }
 
             if(DI_NO_Flag & 0x0001) { checkDI_NO(DINP1,DI1timer,DI_DELAY); }

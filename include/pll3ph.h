@@ -31,6 +31,7 @@ typedef struct {
 } pllBlock;
 
 float32_t     phaseLockedLoopB(pllBlock *pll);
+float32_t     phaseLockedLoop1ph(pllBlock *pll, float32_t v);
 void    InitPLL(pllBlock *pll);
 
 #endif /* INCLUDE_PLL3PH_H_ */

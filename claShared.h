@@ -62,6 +62,25 @@
 #pragma DATA_SECTION(kw_meter_B, "Cla1DataRam")
 #pragma DATA_SECTION(theta, "Cla1DataRam")
 #pragma DATA_SECTION(ctl, "Cla1DataRam")
+#pragma DATA_SECTION(lpf_vinv, "Cla1DataRam")
+#pragma DATA_SECTION(lpf_vout, "Cla1DataRam")
+#pragma DATA_SECTION(lpf_vbyp, "Cla1DataRam")
+#pragma DATA_SECTION(lpf_iinv, "Cla1DataRam")
+#pragma DATA_SECTION(lpf_iout, "Cla1DataRam")
+#pragma DATA_SECTION(vinv_meter, "Cla1DataRam")
+#pragma DATA_SECTION(vout_meter, "Cla1DataRam")
+#pragma DATA_SECTION(vbyp_meter, "Cla1DataRam")
+#pragma DATA_SECTION(iinv_meter, "Cla1DataRam")
+#pragma DATA_SECTION(iout_meter, "Cla1DataRam")
+#pragma DATA_SECTION(kwo_meter, "Cla1DataRam")
+#pragma DATA_SECTION(prV1, "Cla1DataRam")
+#pragma DATA_SECTION(prV3, "Cla1DataRam")
+#pragma DATA_SECTION(prV5, "Cla1DataRam")
+#pragma DATA_SECTION(prV7, "Cla1DataRam")
+#pragma DATA_SECTION(pid_vbat, "Cla1DataRam")
+#pragma DATA_SECTION(pid_ibat, "Cla1DataRam")
+#pragma DATA_SECTION(pid_boost, "Cla1DataRam")
+#pragma DATA_SECTION(theta_inv, "Cla1DataRam")
 #endif
 
 // Parameter arrays (pfc3phParams.h): the CLA reads gains, offsets and limits
@@ -92,11 +111,25 @@ CCEXTERN    rms_meter kw_meter_R, kw_meter_Y, kw_meter_B;
 // Grid angle for the next control sample, written by the CPU (pll_and_sincos)
 CCEXTERN    sincos theta;
 
+// 1-phase inverter, output, bypass
+CCEXTERN    LPF lpf_vinv, lpf_vout, lpf_vbyp;   // AI1 Vinv (before static), AI17 Vout, AI18 Vbypass
+CCEXTERN    LPF lpf_iinv, lpf_iout;             // AI4 Iinv, AI5 Iout
+CCEXTERN    rms_meter vinv_meter, vout_meter, vbyp_meter;
+CCEXTERN    rms_meter iinv_meter, iout_meter, kwo_meter;   // saved at the inverter zero cross
+CCEXTERN    PR_RES prV1, prV3, prV5, prV7;      // inverter voltage resonators (volts)
+CCEXTERN    sincos theta_inv;                   // inverter angle, written by the CPU
+
+// battery buck-boost (BuckBoostEnable = 1)
+CCEXTERN    PFC_PI pid_vbat, pid_ibat;          // buck: battery voltage / current (min select)
+CCEXTERN    PFC_PI pid_boost;                   // boost: DC-link voltage from the battery
+
 // Instantaneous trip events from the control sample (ctl.tripEvt)
 #define TRIP_OC_R       0x0001
 #define TRIP_OC_Y       0x0002
 #define TRIP_OC_B       0x0004
 #define TRIP_DCOV       0x0008
+#define TRIP_INV_OC     0x0010      // inverter current (Iinv), EPWM4/5 tripped
+#define TRIP_BB_OC      0x0020      // battery current, EPWM6 tripped
 
 // Scalars. Kept in one struct so they can be placed with one pragma; the
 // old names stay usable through the #defines below.
@@ -124,14 +157,46 @@ typedef struct
     uint16_t  PFC_HalfPeriod;   // PFC TBPRD/2
     uint16_t  rsync;            // CPU: zero cross seen -> control saves meters
 
+    // CPU -> control, 1-phase inverter (volts, amps)
+    float32_t invVref;          // soft-started output voltage amplitude, V peak
+    float32_t omegaInv;         // inverter angular frequency, rad/s (resonators)
+    float32_t invKp, invKr, invKh, invKci;
+    float32_t invOcLevel;       // A peak
+    float32_t vinvSF, iinvSF, vdcSF;    // scale factors for the volts / amps control
+    uint16_t  invOn;            // invPwmEnabled: 0 holds the voltage controller at zero
+    uint16_t  invHMask;         // resonators: b0 3rd, b1 5th, b2 7th
+    uint16_t  invRevPol;        // InvRevPolarity
+    uint16_t  invOcDelay;       // samples
+    uint16_t  invPeriod;        // inverter TBPRD (EPWM4/5)
+    uint16_t  rsyncInv;         // CPU: inverter zero cross -> control saves output meters
+
+    // CPU -> control, buck-boost (volts, amps)
+    float32_t vbatRef;          // buck: battery voltage reference (soft started)
+    float32_t ibatRef;          // buck: charging current limit
+    float32_t boostRef;         // boost: DC-link reference
+    float32_t boostDmax;
+    float32_t vbatSF, ibatSign; // ibatSign = +/-IbatSF: charging positive
+    float32_t bbOcLevel;        // A peak
+    uint16_t  bbSel;            // bbMode: 0 off, 1 buck, 2 boost
+    uint16_t  bbOcDelay;        // samples
+    uint16_t  bbPeriod;         // buck-boost TBPRD (EPWM6)
+
     // control -> CPU
     float32_t vout_alpha, vout_beta;        // modulation reference
     float32_t vdref, vqref;                 // dq modulation (before dq -> alpha beta)
     float32_t ffvd, ccvd, ccvq;
     float32_t idUnf, iqUnf;                 // unfiltered dq currents
+    float32_t invVrefInst;      // inverter reference voltage, V
+    float32_t invMod;           // inverter modulation index (-1..1)
+    float32_t invU;             // voltage controller output, V
+    float32_t bbDuty;           // buck or boost duty
     uint16_t  tripEvt;          // TRIP_xx bits, set by the control, cleared by the CPU
     uint16_t  ocTimerR, ocTimerY, ocTimerB;
     uint16_t  DCOVTimer;
+    uint16_t  invOcTimer, bbOcTimer;
+    uint16_t  bbModeOld;        // control: mode of the last sample (PI reset on change)
+    uint16_t  rms_samplecount2; // output meters, samples in the last inverter cycle
+    uint16_t  rms_update_flag2;
     uint16_t  rms_samplecount;
     uint16_t  rms_update_flag;
     uint16_t  temp_fsw1;        // PWM updates in the last second (task 2 count)

@@ -1,19 +1,20 @@
 /*
  * pfc3phParams.h
  *
- * Parameter map of the 3-phase PFC (active front end) on the Common
- * Controller v2. Control as in the RBC (RBC2_KDSENG_v4): DC-link PI -> Id
- * reference, dq PI or alpha-beta PR current control.
+ * Parameter map of the 3-phase PFC + 1-phase inverter (optional battery
+ * buck-boost) on the Common Controller v2. PFC control as in the RBC
+ * (RBC2_KDSENG_v4): DC-link PI -> Id reference, dq PI or alpha-beta PR
+ * current control.
  *
  *  Created on: 23-Oct-2026 (from inv3phParams.h)
  *      Author: vijay
  */
 
 //COMPANYNAME:Vertiv
-//UNITNAME:3PH PFC
+//UNITNAME:3PH PFC + 1PH INVERTER
 //LOCATION:
-//INPUTV:415V AC, 3PH, 50Hz
-//OUTPUTV:DC LINK
+//INPUTV:230V AC L-L, 3PH, 50Hz
+//OUTPUTV:230V AC, 1PH
 //OUTPUTCUR:
 //RATEDKVA:
 
@@ -66,6 +67,27 @@
 #define    vdref_mon                   ArrayParamsF[54]  //, ,1
 #define    vqref_mon                   ArrayParamsF[55]  //, ,1
 #define    DMinVal_mon                 ArrayParamsF[56]  //, ,1
+
+// 1-phase inverter / output / bypass / battery
+#define    Vinv                        ArrayParamsF[60]  //,V,1
+#define    Vout                        ArrayParamsF[61]  //,V,1
+#define    Vbyp                        ArrayParamsF[62]  //,V,1
+#define    Iinv                        ArrayParamsF[63]  //,A,1
+#define    Iout                        ArrayParamsF[64]  //,A,1
+#define    kW_Out                      ArrayParamsF[65]  //,kW,1
+#define    kVA_Out                     ArrayParamsF[66]  //,kVA,1
+#define    pf_Out                      ArrayParamsF[67]  //,,1
+#define    LoadPercent                 ArrayParamsF[68]  //,%,1
+#define    InvFrequency                ArrayParamsF[69]  //,Hz,1
+#define    BypFrequency                ArrayParamsF[70]  //,Hz,1
+#define    InvVrefActive               ArrayParamsF[71]  //,V,1
+#define    invModulation               ArrayParamsF[72]  //, ,1
+#define    bbDuty_mon                  ArrayParamsF[73]  //, ,1
+#define    IbatCharge                  ArrayParamsF[74]  //,A,1
+//  battery current, charging positive
+#define    DcLinkRefAuto               ArrayParamsF[75]  //,V,1
+//  DC-link reference from the battery current limit (no buck-boost)
+#define    syncError                   ArrayParamsF[76]  //, ,1
 
 //-------------------------------------------------------------------
 
@@ -127,9 +149,70 @@
 #define    GridFailLevel               ArrayParamsF[149]  //,V,1
 //  fast mains failure (positive sequence, line-line rms): PFC pulses off
 
+//--------------------- 1-phase inverter, bypass ---------------------
+#define    RatedVoltage                ArrayParamsF[150]  //,V,1
+#define    RatedCurrent                ArrayParamsF[151]  //,A,1
+#define    InvVoltageHL                ArrayParamsF[152]  //,V,1
+#define    InvVoltageLL                ArrayParamsF[153]  //,V,1
+#define    InvVoltHL_delay             ArrayParamsF[154]  //,S,1
+#define    InvVoltLL_delay             ArrayParamsF[155]  //,S,1
+#define    BypVoltageHL                ArrayParamsF[156]  //,V,1
+#define    BypVoltageLL                ArrayParamsF[157]  //,V,1
+#define    BypVoltHL_delay             ArrayParamsF[158]  //,S,1
+#define    BypVoltLL_delay             ArrayParamsF[159]  //,S,1
+#define    InvOverload                 ArrayParamsF[160]  //,%,1
+#define    InvOverload_delay           ArrayParamsF[161]  //,S,1
+#define    InvOC_Level                 ArrayParamsF[162]  //,A,1
+//  instantaneous inverter overcurrent (Iinv), peak
+#define    InvDCLinkMin                ArrayParamsF[163]  //,V,1
+//  inverter stops below this DC-link voltage
+#define    VinvSF                      ArrayParamsF[164]  //, ,1
+#define    VoutSF                      ArrayParamsF[165]  //, ,1
+#define    VbypSF                      ArrayParamsF[166]  //, ,1
+#define    IinvSF                      ArrayParamsF[167]  //, ,1
+#define    IoutSF                      ArrayParamsF[168]  //, ,1
+#define    inv_kp                      ArrayParamsF[169]  //, ,1
+//  voltage loop proportional gain (V/V)
+#define    inv_kr                      ArrayParamsF[170]  //,1/s,1
+//  voltage loop fundamental resonant gain
+#define    inv_kh                      ArrayParamsF[171]  //,1/s,1
+//  voltage loop 3rd/5th/7th resonant gain (pr_hMaskInv)
+#define    inv_kci                     ArrayParamsF[172]  //,V/A,1
+//  inner current loop (virtual resistance on Iinv), 0 = off
+#define    FswInv                      ArrayParamsF[173]  //,kHz,1
+#define    LockingLevel                ArrayParamsF[174]  //, ,1
+//  synchronised when |sin(phase error)| below this
+//--------------------- battery, buck-boost --------------------------
+#define    VbatFloat                   ArrayParamsF[175]  //,V,1
+#define    IbatRef                     ArrayParamsF[176]  //,A,1
+//  battery charging current limit
+#define    DcLinkMinNoBuck             ArrayParamsF[177]  //,V,1
+#define    DcLinkMaxNoBuck             ArrayParamsF[178]  //,V,1
+#define    VbatHL                      ArrayParamsF[179]  //,V,1
+#define    VbatLL                      ArrayParamsF[180]  //,V,1
+//  battery end of discharge (buck-boost: boost stops)
+#define    VbatHL_delay                ArrayParamsF[181]  //,S,1
+#define    VbatLL_delay                ArrayParamsF[182]  //,S,1
+#define    DcLinkBoostRef              ArrayParamsF[183]  //,V,1
+//  DC link held by the boost on mains failure
+#define    BoostDmax                   ArrayParamsF[184]  //, ,1
+#define    vbat_kp                     ArrayParamsF[185]  //, ,1
+#define    vbat_ki                     ArrayParamsF[186]  //, ,1
+#define    ibat_kp                     ArrayParamsF[187]  //, ,1
+#define    ibat_ki                     ArrayParamsF[188]  //, ,1
+#define    IbatOC_Level                ArrayParamsF[189]  //,A,1
+//  instantaneous battery overcurrent (buck-boost), peak
+#define    boost_kp                    ArrayParamsF[190]  //, ,1
+#define    boost_ki                    ArrayParamsF[191]  //, ,1
+#define    nobuck_kp                   ArrayParamsF[192]  //,V/A,1
+//  no buck-boost: DC-link reduction per A of excess charging current
+#define    nobuck_ki                   ArrayParamsF[193]  //, ,1
+#define    FswBB                       ArrayParamsF[194]  //,kHz,1
+#define    RatedKVA                    ArrayParamsF[195]  //,kVA,1
+
 #define    LastMem              ArrayParamsF[199]
 
-#define     NUMWPARAMS      60
+#define     NUMWPARAMS      100
 #define     WR_START        100
 
 /*
@@ -211,6 +294,34 @@ STAT5-BIT06: Dmax Ramping
 STAT5-BIT07: PR Current Control
 STAT5-BIT15: BITSVALID
 
+STAT6-BIT00: Inverter Disabled
+STAT6-BIT01: Inverter Ramping
+STAT6-BIT02: Load on Inverter
+STAT6-BIT03: Load on Bypass
+STAT6-BIT04: Manual Bypass
+STAT6-BIT05: Not Synced
+STAT6-BIT06: Inverter Voltage Low
+STAT6-BIT07: Inverter Voltage High
+STAT6-BIT08: Inverter OverLoad
+STAT6-BIT09: Inverter Inst.OC
+STAT6-BIT10: Bypass OK
+STAT6-BIT11: Inverter OK
+STAT6-BIT12: DC Link Low (Inverter)
+STAT6-BIT13: Inverter Trip
+STAT6-BIT14: Inverter Latched
+STAT6-BIT15: BITSVALID
+
+STAT7-BIT00: Buck-Boost Fitted
+STAT7-BIT01: Battery Charging (Buck)
+STAT7-BIT02: Battery Discharging (Boost)
+STAT7-BIT03: Charge Current Limit
+STAT7-BIT04: Battery Low
+STAT7-BIT05: Battery High
+STAT7-BIT06: Battery Inst.OC
+STAT7-BIT07: Buck-Boost VCESAT
+STAT7-BIT08: Battery End of Discharge
+STAT7-BIT15: BITSVALID
+
 PLOTS-WAV00: Vgrid_R
 PLOTS-WAV01: Vgrid_Y
 PLOTS-WAV02: Vgrid_B
@@ -218,19 +329,19 @@ PLOTS-WAV03: Iinp_R
 PLOTS-WAV04: Iinp_Y
 PLOTS-WAV05: Iinp_B
 PLOTS-WAV06: DC Link
-PLOTS-WAV07: Mod_Alpha
-PLOTS-WAV08: Mod_Beta
-PLOTS-WAV09: Id_fbk
-PLOTS-WAV10: Iq_fbk
-PLOTS-WAV11: Id_out
-PLOTS-WAV12: Iq_out
-PLOTS-WAV13: DCLink_PI_out
-PLOTS-WAV14: DCLink_SoftRef
-PLOTS-WAV15: PLL_Sin
-PLOTS-WAV16: PLL_Sin0
-PLOTS-WAV17: Mod_Ta
-PLOTS-WAV18: Mod_Tb
-PLOTS-WAV19: Mod_Tc
+PLOTS-WAV07: Id_fbk
+PLOTS-WAV08: Iq_fbk
+PLOTS-WAV09: DCLink_PI_out
+PLOTS-WAV10: Vinv
+PLOTS-WAV11: Vout
+PLOTS-WAV12: Iinv
+PLOTS-WAV13: Iout
+PLOTS-WAV14: Vbypass
+PLOTS-WAV15: Inv_Vref
+PLOTS-WAV16: Inv_Mod
+PLOTS-WAV17: Inv_Sin
+PLOTS-WAV18: Byp_PLL_Sin
+PLOTS-WAV19: Ibat
 
 */
 
@@ -298,6 +409,21 @@ PLOTS-WAV19: Mod_Tc
 #define     Syncfailtimer       ArrayParamsI[67]  //,ms,1
 #define     mainConTimer        ArrayParamsI[68]  //,ms,1
 #define     pulseON             ArrayParamsI[69]  //, ,1
+#define     AlarmFlag6          ArrayParamsI[70]  //, ,2
+#define     AlarmFlag7          ArrayParamsI[71]  //, ,2
+#define     invPwmEnabled       ArrayParamsI[72]  //, ,1
+#define     bbMode              ArrayParamsI[73]  //, ,1
+//  0 = off, 1 = buck (charging), 2 = boost (discharging)
+#define     InvTripCount        ArrayParamsI[74]  //, ,1
+#define     invRestartTimer     ArrayParamsI[75]  //,S,1
+#define     xfrCommand          ArrayParamsI[76]  //, ,1
+#define     Synced              ArrayParamsI[77]  //, ,1
+#define     bypassFailed        ArrayParamsI[78]  //, ,1
+#define     FSW_inv             ArrayParamsI[79]  //, ,1
+#define     xfr2InvTimer        ArrayParamsI[80]  //,S,1
+#define     invRunningTimer     ArrayParamsI[81]  //,S,1
+#define     invPulseON          ArrayParamsI[82]  //, ,1
+#define     bbPulseON           ArrayParamsI[83]  //, ,1
 
 #define     AutoSaveTimer       ArrayParamsI[89]  //, ,1
 #define     adcIsrTime          ArrayParamsI[90]  //, ,1
@@ -338,6 +464,19 @@ PLOTS-WAV19: Mod_Tc
 //  battery current sensor zero, 12-bit ADC count
 #define     DI_NO_Flag          ArrayParamsI[122]  //, ,1
 #define     UpdateEEPROM        ArrayParamsI[123]  //, ,1
+#define     BuckBoostEnable     ArrayParamsI[124]  //, ,1
+//  0 = battery on the DC link (variable 320-400 V), 1 = buck-boost (680 V DC link)
+#define     InvEnable           ArrayParamsI[125]  //, ,1
+#define     IbatPolarity        ArrayParamsI[126]  //, ,1
+//  1 = battery current sensor reversed (charging must read positive)
+#define     InvRevPolarity      ArrayParamsI[127]  //, ,1
+//  1 = inverter current sensor reversed
+#define     pr_hMaskInv         ArrayParamsI[128]  //, ,1
+//  inverter resonators: b0 = 3rd, b1 = 5th, b2 = 7th
+#define     InvMaxRestart       ArrayParamsI[129]  //, ,1
+#define     xfrToInverterDelay  ArrayParamsI[130]  //,S,1
+#define     InvOC_Delay         ArrayParamsI[131]  //,50uS,1
+#define     BBOC_Delay          ArrayParamsI[132]  //,50uS,1
 
 #define     an1Offset           ArrayParamsI[160]  //, ,1
 #define     an2Offset           ArrayParamsI[161]  //, ,1
@@ -387,7 +526,9 @@ PLOTS-WAV19: Mod_Tc
 #define     PFSign_Bit              DOParams[104]
 #define     MainConAuxUsed_Bit      DOParams[105]
 #define     UpdateEEPROM_Bit        DOParams[106]
-#define     emShutdown_Bit          DOParams[107]
+#define     BuckBoostEnable_Bit     DOParams[107]
+#define     InvEnable_Bit           DOParams[108]
+#define     emShutdown_Bit          DOParams[109]
 
 
 #endif

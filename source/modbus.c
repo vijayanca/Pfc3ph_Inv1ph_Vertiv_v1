@@ -21,8 +21,8 @@ void update_datablock_DI(void);
 extern SVGEN_CLA svgen_dq1;
 
 // Coils 100.. -> int parameter: UnitOnCommand, AcceptReset, TestMode, RevPolarity,
-// PFSign, MainConAuxUsed, UpdateEEPROM (pfc3phParams.h xxx_Bit)
-N16 DObitAddress[] = {100, 101, 102, 111, 112, 115, 123};
+// PFSign, MainConAuxUsed, UpdateEEPROM, BuckBoostEnable, InvEnable (pfc3phParams.h xxx_Bit)
+N16 DObitAddress[] = {100, 101, 102, 111, 112, 115, 123, 124, 125};
 
 // Two Modbus ports with the same register map:
 //   MB_PORT_A = SCIA, RS485 #2 (TXEN GPIO34)
@@ -401,19 +401,19 @@ Uint16  pi_com(N16 port)
 #define     plot4       lpf_iY.y
 #define     plot5       lpf_iB.y
 #define     plot6       lpf_dclink.y
-#define     plot7       vout_alpha      // modulation reference
-#define     plot8       vout_beta
-#define     plot9       pfc.lpf_de.y    // Id, Iq feedback
-#define     plot10      pfc.lpf_qe.y
-#define     plot11      pfc.pid_de.Out
-#define     plot12      pfc.pid_qe.Out
-#define     plot13      pid_dclink.Out
-#define     plot14      dcLinkSoftRef
-#define     plot15      pllGrid.theta.sin_val
-#define     plot16      pllGrid.theta_0.sin_val
-#define     plot17      svgen_dq1.Ta
-#define     plot18      svgen_dq1.Tb
-#define     plot19      svgen_dq1.Tc
+#define     plot7       pfc.lpf_de.y    // Id, Iq feedback
+#define     plot8       pfc.lpf_qe.y
+#define     plot9       pid_dclink.Out
+#define     plot10      lpf_vinv.y      // 1-phase inverter / output / bypass
+#define     plot11      lpf_vout.y
+#define     plot12      lpf_iinv.y
+#define     plot13      lpf_iout.y
+#define     plot14      lpf_vbyp.y
+#define     plot15      ctl.invVrefInst
+#define     plot16      ctl.invMod
+#define     plot17      theta_inv.sin_val
+#define     plot18      pllByp.theta.sin_val
+#define     plot19      lpf_ibat.y
 
 void snapShot(N16 st_addr)
 {
@@ -703,6 +703,8 @@ void UpdateBits(void)
     BitsUpdate(64, AlarmFlag5 , DOParams);
     BitsUpdate(80, RelayFlag,  DOParams);
     BitsUpdate(96, CommStatusFlag , DOParams);
+    BitsUpdate(112, AlarmFlag6, DOParams);
+    BitsUpdate(128, AlarmFlag7, DOParams);
 
     UnitOnCommand_Bit       = UnitOnCommand ;
     AcceptReset_Bit         = AcceptReset   ;
@@ -711,6 +713,8 @@ void UpdateBits(void)
     PFSign_Bit              = PFSign        ;
     MainConAuxUsed_Bit      = MainConAuxUsed;
     UpdateEEPROM_Bit        = UpdateEEPROM  ;
+    BuckBoostEnable_Bit     = BuckBoostEnable;
+    InvEnable_Bit           = InvEnable     ;
     emShutdown_Bit          = EmergencyStop ;
 
     BitsUpdate(0, DigitalInputFlag1, DIParams);

@@ -126,6 +126,8 @@ CCEXTERN    N16 AlarmFlag2_old INIT0;
 CCEXTERN    N16 AlarmFlag3_old INIT0;
 CCEXTERN    N16 AlarmFlag4_old INIT0;
 CCEXTERN    N16 AlarmFlag5_old INIT0;
+CCEXTERN    N16 AlarmFlag6_old INIT0;
+CCEXTERN    N16 AlarmFlag7_old INIT0;
 
 CCEXTERN    volatile N16    snap_start INIT0;
 CCEXTERN    volatile N16    snap_end INIT0;
@@ -155,6 +157,27 @@ CCEXTERN    MIN_MAX chkIy;
 CCEXTERN    MIN_MAX chkIb;
 CCEXTERN    MIN_MAX chkdcLink;
 
+
+//------------------------ 1-phase inverter, static switch, battery
+CCEXTERN    volatile N16 InvPwmPeriod INIT0;
+CCEXTERN    volatile N16 BBPwmPeriod INIT0;
+CCEXTERN    INVMODE  InvFlag;
+CCEXTERN    BATTMODE BattFlag;
+CCEXTERN    pllBlock pllByp;                    // 1-phase SOGI PLL on the bypass (AI18)
+CCEXTERN    LPF lpf_omegaByp;
+CCEXTERN    volatile float32_t angleInv INIT0;      // inverter angle, rad
+CCEXTERN    volatile float32_t omegaInv INIT0;      // rad/sample
+CCEXTERN    volatile float32_t bypassFailLevel INIT0;   // p.u. peak
+CCEXTERN    volatile N16 invSoftStart INIT0;
+CCEXTERN    volatile N16 syncCount INIT0;
+CCEXTERN    volatile N16 bypSyncOK INIT0;       // bypass usable for synchronisation (1 ms)
+CCEXTERN    float32_t nobuck_ui INIT0;          // no buck-boost: DC-link reduction integrator, V
+CCEXTERN    LPF32 lpf32_vinv, lpf32_vout, lpf32_vbyp, lpf32_iinv, lpf32_iout;
+CCEXTERN    MIN_MAX chkVinv;
+CCEXTERN    MIN_MAX chkVbyp;
+CCEXTERN    MIN_MAX chkIout;
+CCEXTERN    MIN_MAX chkVbat;
+CCEXTERN    float32_t InvOverloadA INIT0;       // RatedCurrent x InvOverload / 100
 
 CCEXTERN    MCAN_RxBufElement rxMsg[1];
 CCEXTERN    MCAN_RxBufElement rxMsg1;

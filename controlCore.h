@@ -1,7 +1,9 @@
 /*
  * controlCore.h
  *
- * 3-phase PFC control math, one copy for both cores:
+ * 3-phase PFC + 1-phase inverter + battery buck-boost control math, one copy
+ * for both cores (inverter and buck-boost: ctl_inverter / ctl_buckboost, in
+ * the 20 kHz sample, CMPs written shadowed):
  *   CONTROL_ON_CLA = 1 : cla_tasks.cla, Cla1Task1 (ADCA INT1, 20 kHz) and
  *                        Cla1Task2 (EPWM1 INT, PFC PWM rate)
  *   CONTROL_ON_CLA = 0 : AdcISR (interrupt.c) and EPWM_PFC_ISR (pwm.c) on the CPU
@@ -62,7 +64,10 @@ CORE_INLINE float32_t core_dtSign(float32_t x)
   D   Vr_inv D14  Vb_out D15  Vy_out D12  Ibat D11      -
   E   Ib_ind E11  Vy_inv E12  Vr_out E16  -             -
  PFC use: grid voltage = Vr/y/b_byp (line to neutral), PFC current =
- Ir/y/b_ind, DC link C0. The other channels are read for display only.
+ Ir/y/b_ind, DC link C0.
+ 1-phase inverter use: AI1 (D14) Vinv before the static switch, AI17 (E16)
+ Vout after it, AI18 (D12) bypass voltage, AI4 (A5) Iinv, AI5 (B8) Iout.
+ Battery: AI20 (C2) Vbat, AI21 (D11) Ibat.
  */
 CORE_INLINE void ctl_acquire(void)
 {
@@ -122,6 +127,20 @@ CORE_INLINE void ctl_acquire(void)
     lpf_temp2.u = (float32_t)AnalogInput16 * CONV_DC;
     LOWPASSFILTER(lpf_temp1);
     LOWPASSFILTER(lpf_temp2);
+
+    // 1-phase inverter side
+    lpf_vinv.u = (float32_t)(AnalogInput1 - an1Offset) * CONV_AC - lpf_bias.u;
+    lpf_vout.u = (float32_t)(AnalogInput17 - an17Offset) * CONV_AC - lpf_bias.u;
+    lpf_vbyp.u = (float32_t)(AnalogInput18 - an18Offset) * CONV_AC - lpf_bias.u;
+    LOWPASSFILTER(lpf_vinv);
+    LOWPASSFILTER(lpf_vout);
+    LOWPASSFILTER(lpf_vbyp);
+
+    x = ctl.invRevPol ? -1.0f : 1.0f;           // inverter current sensor direction
+    lpf_iinv.u = ((float32_t)(AnalogInput4 - an4Offset) * CONV_AC - lpf_bias.u) * x;
+    lpf_iout.u = ((float32_t)(AnalogInput5 - an5Offset) * CONV_AC - lpf_bias.u) * x;
+    LOWPASSFILTER(lpf_iinv);
+    LOWPASSFILTER(lpf_iout);
 }
 
 // Instantaneous trips (unfiltered values), counted in samples. A trip stops the
@@ -163,6 +182,35 @@ CORE_INLINE void ctl_protect(void)
         ctl.ocTimerR = 0; ctl.ocTimerY = 0; ctl.ocTimerB = 0;
         DCOVTimer = 0;
     }
+
+    // inverter current (Iinv): one-shot trip of EPWM4/5
+    if(ctl.invOn)
+    {
+        CORE_TRIPCOUNT(CORE_FABS(lpf_iinv.u) * ctl.iinvSF > ctl.invOcLevel, ctl.invOcTimer, ctl.invOcDelay);
+        if(ctl.invOcTimer == ctl.invOcDelay)
+        {
+            CORE_EALLOW();
+            EPwm4Regs.TZFRC.bit.OST = 1;
+            EPwm5Regs.TZFRC.bit.OST = 1;
+            CORE_EDIS();
+            ctl.tripEvt |= TRIP_INV_OC;
+        }
+    }
+    else ctl.invOcTimer = 0;
+
+    // battery current (buck-boost): one-shot trip of EPWM6
+    if(ctl.bbSel)
+    {
+        CORE_TRIPCOUNT(CORE_FABS(lpf_ibat.u * ctl.ibatSign) > ctl.bbOcLevel, ctl.bbOcTimer, ctl.bbOcDelay);
+        if(ctl.bbOcTimer == ctl.bbOcDelay)
+        {
+            CORE_EALLOW();
+            EPwm6Regs.TZFRC.bit.OST = 1;
+            CORE_EDIS();
+            ctl.tripEvt |= TRIP_BB_OC;
+        }
+    }
+    else ctl.bbOcTimer = 0;
 }
 
 CORE_INLINE void ctl_current(void)
@@ -309,6 +357,130 @@ CORE_INLINE void ctl_current(void)
     DQ2AB_F(vout_alpha, vout_beta, ctl.vdref, ctl.vqref, theta);
 }
 
+/*
+ 1-phase inverter, unipolar full bridge on EPWM4 (leg A) / EPWM5 (leg B):
+   vref = invVref * sin(theta_inv)                     (V)
+   u    = Kp*e + PR(fund) + PR(3rd/5th/7th), e = vref - Vinv
+   vcmd = vref + u - Kci*Iinv                          (inner current loop =
+                                                        virtual resistance, damps the LC filter)
+   m    = vcmd / Vdc,  leg A duty (1+m)/2, leg B (1-m)/2
+ Volts / amps through the scale factors, so the gains do not depend on them.
+ */
+CORE_INLINE void ctl_inverter(void)
+{
+    float32_t vinv, iinv, vdc, ev, u, vcmd, m, w, lim, p;
+
+    vinv = lpf_vinv.y * ctl.vinvSF;
+    iinv = lpf_iinv.y * ctl.iinvSF;
+    vdc  = lpf_dclink.y * ctl.vdcSF;
+    if(vdc < 20.0f) vdc = 20.0f;
+
+    ctl.invVrefInst = ctl.invVref * theta_inv.sin_val;
+
+    if(!ctl.invOn)
+    {
+        PR_RES_CLEAR(prV1); PR_RES_CLEAR(prV3);
+        PR_RES_CLEAR(prV5); PR_RES_CLEAR(prV7);
+        ctl.invU = 0.0f;
+        m = 0.0f;
+    }
+    else
+    {
+        ev = ctl.invVrefInst - vinv;
+        w = ctl.omegaInv;
+        lim = 0.5f*vdc;                         // resonator states: half the DC link
+
+        PR_RES_MACRO_L(prV1, ev, ctl.invKr, w, PR_DAMP2, lim);
+        u = ctl.invKp*ev + prV1.v1;
+
+        if((ctl.invKh >= 1.0f) && (ctl.invHMask & 1U))
+        {
+            PR_RES_MACRO_L(prV3, ev, ctl.invKh, 3.0f*w, PR_DAMP2_H, lim);
+            u += prV3.v1;
+        }
+        else { PR_RES_CLEAR(prV3); }
+        if((ctl.invKh >= 1.0f) && (ctl.invHMask & 2U))
+        {
+            PR_RES_MACRO_L(prV5, ev, ctl.invKh, 5.0f*w, PR_DAMP2_H, lim);
+            u += prV5.v1;
+        }
+        else { PR_RES_CLEAR(prV5); }
+        if((ctl.invKh >= 1.0f) && (ctl.invHMask & 4U))
+        {
+            PR_RES_MACRO_L(prV7, ev, ctl.invKh, 7.0f*w, PR_DAMP2_H, lim);
+            u += prV7.v1;
+        }
+        else { PR_RES_CLEAR(prV7); }
+
+        ctl.invU = u;
+        vcmd = ctl.invVrefInst + u - ctl.invKci*iinv;
+        m = vcmd / vdc;
+        if(m > 0.98f) m = 0.98f;
+        if(m < -0.98f) m = -0.98f;
+    }
+    ctl.invMod = m;
+
+    // up-down carrier, output high while CTR > CMPA: duty = 1 - CMPA/TBPRD
+    p = (float32_t)ctl.invPeriod;
+    EPwm4Regs.CMPA.bit.CMPA = (uint16_t)(0.5f*p*(1.0f - m));
+    EPwm5Regs.CMPA.bit.CMPA = (uint16_t)(0.5f*p*(1.0f + m));
+}
+
+/*
+ Battery buck-boost on EPWM6 (BuckBoostEnable = 1): one switch at a time.
+   bbMode 1, buck  (EPWM6A): charging, CC/CV = min(battery voltage PI,
+                             battery current PI), the losing integrator follows
+   bbMode 2, boost (EPWM6B): DC link held at boostRef from the battery
+ The idle output is held low by a continuous software force (AQCSFRC).
+ */
+CORE_INLINE void ctl_buckboost(void)
+{
+    float32_t vbat, ibat, vdc, d = 0.0f, p;
+    uint16_t mode = ctl.bbSel;
+
+    vbat = lpf_vbat.y * ctl.vbatSF;
+    ibat = lpf_ibat.y * ctl.ibatSign;           // charging positive
+    vdc  = lpf_dclink.y * ctl.vdcSF;
+
+    if(mode != ctl.bbModeOld)
+    {
+        pid_vbat.ui = 0.0f;  pid_vbat.Out = 0.0f;
+        pid_ibat.ui = 0.0f;  pid_ibat.Out = 0.0f;
+        pid_boost.ui = 0.0f; pid_boost.Out = 0.0f;
+        // 1 = force low, 0 = no force
+        EPwm6Regs.AQCSFRC.bit.CSFA = (mode == 1) ? 0 : 1;
+        EPwm6Regs.AQCSFRC.bit.CSFB = (mode == 2) ? 0 : 1;
+        ctl.bbModeOld = mode;
+    }
+
+    if(mode == 1)
+    {
+        pid_vbat.Ref = ctl.vbatRef;
+        pid_vbat.Fbk = vbat;
+        PFC_PI_MACRO(pid_vbat);
+        pid_ibat.Ref = ctl.ibatRef;
+        pid_ibat.Fbk = ibat;
+        PFC_PI_MACRO(pid_ibat);
+
+        if(pid_ibat.Out < pid_vbat.Out) { d = pid_ibat.Out; pid_vbat.ui = pid_ibat.ui; }
+        else { d = pid_vbat.Out; pid_ibat.ui = pid_vbat.ui; }
+    }
+    else if(mode == 2)
+    {
+        pid_boost.Umax = ctl.boostDmax;
+        pid_boost.Ref = ctl.boostRef;
+        pid_boost.Fbk = vdc;
+        PFC_PI_MACRO(pid_boost);
+        d = pid_boost.Out;
+    }
+    ctl.bbDuty = d;
+
+    // up-down carrier, output high while CTR > CMPx: duty = 1 - CMPx/TBPRD
+    p = (float32_t)ctl.bbPeriod;
+    EPwm6Regs.CMPA.bit.CMPA = (mode == 1) ? (uint16_t)(p*(1.0f - d)) : ctl.bbPeriod;
+    EPwm6Regs.CMPB.bit.CMPB = (mode == 2) ? (uint16_t)(p*(1.0f - d)) : ctl.bbPeriod;
+}
+
 CORE_INLINE void ctl_rms(void)
 {
     float32_t vR = lpf_vR.y, vY = lpf_vY.y, vB = lpf_vB.y;
@@ -355,6 +527,27 @@ CORE_INLINE void ctl_rms(void)
         rms_update_flag = 1;
         rsync = 0;
     }
+
+    // inverter / output / bypass, saved at the inverter zero cross
+    UPDATE_RMS(vinv_meter, lpf_vinv.y);
+    UPDATE_RMS(vout_meter, lpf_vout.y);
+    UPDATE_RMS(vbyp_meter, lpf_vbyp.y);
+    UPDATE_RMS(iinv_meter, lpf_iinv.y);
+    UPDATE_RMS(iout_meter, lpf_iout.y);
+    UPDATE_KW(kwo_meter, lpf_vout.y, lpf_iout.y, VoutSF, IoutSF);
+
+    if(ctl.rsyncInv)
+    {
+        ctl.rms_samplecount2 = vinv_meter.sample_count;
+        SAVE_METER(vinv_meter);
+        SAVE_METER(vout_meter);
+        SAVE_METER(vbyp_meter);
+        SAVE_METER(iinv_meter);
+        SAVE_METER(iout_meter);
+        SAVE_METER(kwo_meter);
+        ctl.rms_update_flag2 = 1;
+        ctl.rsyncInv = 0;
+    }
 }
 
 // SYSCLK counts since the ADC trigger (EPWM8 SOCA at period, up-down, TBPRD 3750)
@@ -372,6 +565,8 @@ CORE_INLINE void ctl_task1(void)
     ctl_acquire();
     ctl_protect();
     ctl_current();
+    ctl_inverter();
+    ctl_buckboost();
     ctl_rms();
 }
 
@@ -424,6 +619,9 @@ CORE_INLINE void ctl_init(void)
     ctl.dmaxRamping = 0;
     ctl.forceOn = 0;
     ctl.tripEvt = 0;
+    ctl.invOn = 0;
+    ctl.bbSel = 0;
+    ctl.bbModeOld = 3;          // forces the AQCSFRC set up in the first sample
     ctl.claLayout = (uint16_t)sizeof(CTL_SHARED);
 }
 
